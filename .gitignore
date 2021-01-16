@@ -30,3 +30,10 @@
 *.exe
 *.out
 *.app
+
+# Document
+Doxyfile
+
+# Directories
+build/
+docs/

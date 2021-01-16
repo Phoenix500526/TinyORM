@@ -1,0 +1,40 @@
+# 项目名称，将作为于所生成的程序文档首页标题
+PROJECT_NAME        = “@CMAKE_PROJECT_NAME@”
+# 文档版本号，可对应于项目版本号，譬如 svn、cvs 所生成的项目版本号
+PROJECT_NUMBER      = @VERSION_MAJOR@.@VERSION_MINOR@.@VERSION_PATCH@
+# 程序文档输出目录
+OUTPUT_DIRECTORY    =  docs
+ 
+# 程序文档输入目录 
+INPUT                =   @PROJECT_SOURCE_DIR@ @PROJECT_BINARY_DIR@
+ 
+# 只对头文件中的文档化信息生成程序文档 
+FILE_PATTERNS        = *.h *.cc
+ 
+# 递归遍历当前目录的子目录，寻找被文档化的程序源文件 
+RECURSIVE            = YES 
+ 
+#提取信息，包含类的私有数据成员和静态成员
+EXTRACT_ALL            = yes
+EXTRACT_PRIVATE        = yes
+EXTRACT_STATIC        = yes
+# 对于使用 typedef 定义的结构体、枚举、联合等数据类型，只按照 typedef 定义的类型名进行文档化
+TYPEDEF_HIDES_STRUCT  = YES
+
+# 递归遍历示例程序目录的子目录，寻找被文档化的程序源文件
+EXAMPLE_RECURSIVE      = YES
+# 允许程序文档中显示本文档化的函数相互调用关系
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+REFERENCES_LINK_SOURCE = YES
+# 不生成 latex 格式的程序文档
+GENERATE_LATEX        = NO
+# 在程序文档中允许以图例形式显示函数调用关系，前提是你已经安装了 graphviz 软件包
+HAVE_DOT              = YES
+CALL_GRAPH            = YES
+CALLER_GRAPH          = YES
+#在最后生成的文档中，把所有的源代码包含在其中
+SOURCE_BROWSER        = YES
+#这会在HTML文档中，添加一个侧边栏，并以树状结构显示包、类、接口等的关系
+GENERATE_HTML         = YES
+GENERATE_TREEVIEW      ＝ YES
