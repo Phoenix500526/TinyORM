@@ -21,3 +21,7 @@ if(NOT CLANG_FORMAT_BIN_NAME-NOTFOUND)
             ${ALL_SOURCE_FILES}
     )
 endif()
+
+include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+conan_basic_setup()
+enable_testing()
