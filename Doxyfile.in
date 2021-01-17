@@ -14,6 +14,9 @@ FILE_PATTERNS        = *.h *.cc
 # 递归遍历当前目录的子目录，寻找被文档化的程序源文件 
 RECURSIVE            = YES 
  
+# 过滤以下目录
+EXCLUDE_PATTERNS       = */test/*  */example/* */build/*
+
 #提取信息，包含类的私有数据成员和静态成员
 EXTRACT_ALL            = yes
 EXTRACT_PRIVATE        = yes
