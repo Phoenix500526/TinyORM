@@ -2,6 +2,7 @@
 #define TINYORM_H_
 
 #include <cstddef>
+#include <list>
 #include <map>
 #include <sstream>
 #include <string>
@@ -27,7 +28,7 @@
 
 #define NO_REFLECTIONED \
   "Please Inject the metainformation of your class by `REFLECTION` first"
-#define NO_SUCH_FIELD "No such field"
+#define NO_SUCH_FIELD "No such a field"
 #define BAD_TYPE "Invalid Type"
 #define NULL_DESERIALIZE "Cannot deserialize NULL value to a non-nullable value"
 
@@ -266,6 +267,247 @@ class Deserializer {
   }
 };
 
+namespace Expression {
+
+/**
+ * @brief AssignmentExpr can serialize a C++ assignment expression, like
+ * `name="phoenix"`, to a SQL expression,like name='phoenix'
+ */
+class AssignmentExpr {
+ private:
+  std::string expr_;
+
+ public:
+  AssignmentExpr(const std::string& op) : expr_(std::move(op)) {}
+  ~AssignmentExpr() = default;
+  const std::string& ToString() const { return expr_; }
+  inline AssignmentExpr operator&&(const AssignmentExpr& rhs) {
+    return AssignmentExpr{expr_ + "," + rhs.expr_};
+  }
+};
+
+template <typename T>
+struct FieldBase {
+  std::string fieldName_;
+  const std::string* tableName_;
+  FieldBase(const std::string& field, const std::string* table)
+      : fieldName_(std::move(field)), tableName_(table) {}
+  inline std::string ToString() {
+    return std::string{(tableName_ ? *tableName_ : "") + fieldName_};
+  }
+};
+
+template <typename T>
+struct Field : public FieldBase<T> {
+  Field(const std::string& field, const std::string* table)
+      : FieldBase<T>(field, table) {}
+  inline AssignmentExpr operator=(T value) {
+    std::ostringstream os;
+    Serializer::Serialize(os << this->fieldName_ << "=", value);
+    return AssignmentExpr(os.str());
+  }
+};
+
+template <typename T>
+struct NullableField : public Field<T> {
+  NullableField(const std::string& field, const std::string* table)
+      : Field<T>(std::move(field), table) {}
+  inline AssignmentExpr operator=(T value) {
+    std::ostringstream os;
+    Serializer::Serialize(os << this->fieldName_ << "=", value);
+    return AssignmentExpr(os.str());
+  }
+  inline AssignmentExpr operator=(std::nullptr_t) {
+    return AssignmentExpr{this->fieldName_ + "=null"};
+  }
+};
+
+template <typename T>
+struct AggregateField : public FieldBase<T> {
+  AggregateField(std::string function)
+      : FieldBase<T>(std::move(function), nullptr) {}
+  AggregateField(std::string function, const Field<T>& field)
+      : FieldBase<T>(std::move(function) + "(" + *field.tableName_ + "." +
+                         field.fieldName_ + ")",
+                     nullptr) {}
+};
+
+class RelationExpr {
+ public:
+  /**
+   * @brief Unary Relationship Expression Constructor
+   */
+  template <typename T>
+  RelationExpr(const FieldBase<T>& field, std::string op)
+      : exprs_{{field.fieldName_ + op, field.tableName_}} {}
+
+  /**
+   * @brief Binary Relationship Expression Constructor
+   */
+  template <typename T>
+  RelationExpr(const FieldBase<T>& field, std::string op, T value) {
+    std::ostringstream os;
+    Serializer::Serialize(os << field.fieldName_ << op, value);
+    exprs_.emplace_back(os.str(), field.tableName_);
+  }
+
+  /**
+   * @brief Binary Relationship Expression Constructor
+   */
+  template <typename T>
+  RelationExpr(const FieldBase<T>& lhs, std::string op, const FieldBase<T>& rhs)
+      : exprs_{{lhs.fieldName_, lhs.tableName_},
+               {std::move(op), nullptr},
+               {rhs.fieldName_, rhs.tableName_}} {}
+
+  std::string ToString() const {
+    std::ostringstream os;
+    for (const auto& item : exprs_) {
+      if (item.second) os << *(item.second) << ".";
+      os << item.first;
+    }
+    return os.str();
+  }
+
+  inline RelationExpr operator&&(const RelationExpr& rhs) const {
+    return And_Or(rhs, "and");
+  }
+
+  inline RelationExpr operator||(const RelationExpr& rhs) const {
+    return And_Or(rhs, "or");
+  }
+
+ private:
+  std::list<std::pair<std::string, const std::string*>> exprs_;
+  inline RelationExpr And_Or(const RelationExpr& rhs, std::string op) const {
+    auto ret = *this;
+    auto rightExprs = rhs.exprs_;
+    ret.exprs_.emplace_front("(", nullptr);
+    ret.exprs_.emplace_back(std::move(op), nullptr);
+    ret.exprs_.splice(ret.exprs_.cend(), std::move(rightExprs));
+    ret.exprs_.emplace_back(")", nullptr);
+    return ret;
+  }
+};
+
+//! Field op value
+template <typename T>
+inline RelationExpr operator==(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, "=", value);
+}
+
+template <typename T>
+inline RelationExpr operator!=(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, "!=", value);
+}
+
+template <typename T>
+inline RelationExpr operator<(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, "<", value);
+}
+
+template <typename T>
+inline RelationExpr operator<=(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, "<=", value);
+}
+
+template <typename T>
+inline RelationExpr operator>(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, ">", value);
+}
+
+template <typename T>
+inline RelationExpr operator>=(const FieldBase<T>& field, T value) {
+  return RelationExpr(field, ">=", value);
+}
+
+inline RelationExpr operator&(const FieldBase<std::string>& field,
+                              const std::string& value) {
+  return RelationExpr(field, " like ", value);
+}
+
+inline RelationExpr operator|(const FieldBase<std::string>& field,
+                              const std::string& value) {
+  return RelationExpr(field, " not like ", value);
+}
+
+//! Field op Field
+template <typename T>
+inline RelationExpr operator==(const FieldBase<T>& lhs,
+                               const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, "=", rhs);
+}
+
+template <typename T>
+inline RelationExpr operator!=(const FieldBase<T>& lhs,
+                               const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, "!=", rhs);
+}
+
+template <typename T>
+inline RelationExpr operator<(const FieldBase<T>& lhs,
+                              const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, "<", rhs);
+}
+
+template <typename T>
+inline RelationExpr operator<=(const FieldBase<T>& lhs,
+                               const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, "<=", rhs);
+}
+
+template <typename T>
+inline RelationExpr operator>(const FieldBase<T>& lhs,
+                              const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, ">", rhs);
+}
+
+template <typename T>
+inline RelationExpr operator>=(const FieldBase<T>& lhs,
+                               const FieldBase<T>& rhs) {
+  return RelationExpr(lhs, ">=", rhs);
+}
+
+//! NullableField op null
+template <typename T>
+inline RelationExpr operator==(const FieldBase<T>& lhs, std::nullptr_t) {
+  return RelationExpr(lhs, " is null");
+}
+
+template <typename T>
+inline RelationExpr operator!=(const FieldBase<T>& lhs, std::nullptr_t) {
+  return RelationExpr(lhs, " is not null");
+}
+
+//! Aggregate Function
+inline auto Count() { return AggregateField<size_t>("count (*)"); }
+
+template <typename T>
+inline auto Count(const Field<T>& field) {
+  return AggregateField<T>("count", field);
+}
+
+template <typename T>
+inline auto Sum(const Field<T>& field) {
+  return AggregateField<T>("sum", field);
+}
+
+template <typename T>
+inline auto Max(const Field<T>& field) {
+  return AggregateField<T>("max", field);
+}
+
+template <typename T>
+inline auto Min(const Field<T>& field) {
+  return AggregateField<T>("min", field);
+}
+
+template <typename T>
+inline auto Avg(const Field<T>& field) {
+  return AggregateField<T>("avg", field);
+}
+
+}  // namespace Expression
 }  // namespace tinyorm_impl
 
 namespace tinyorm {
@@ -306,13 +548,23 @@ class FieldExtractor {
  public:
   template <typename... Classes>
   FieldExtractor(const Classes&... args) {
-    ((Extract(args)), ...);
+    (Extract(args), ...);
   }
   ~FieldExtractor() = default;
 
   template <typename T>
-  inline const pair_type& operator()(const T& field) const {
-    return Get(field);
+  inline tinyorm_impl::Expression::NullableField<T> operator()(
+      const Nullable<T>& field) const {
+    const auto& res = Get(field);
+    return tinyorm_impl::Expression::NullableField<T>{std::move(res.first),
+                                                      &res.second};
+  }
+
+  template <typename T>
+  inline tinyorm_impl::Expression::Field<T> operator()(const T& field) const {
+    const auto& res = Get(field);
+    return tinyorm_impl::Expression::Field<T>{std::move(res.first),
+                                              &res.second};
   }
 };
 
