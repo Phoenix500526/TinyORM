@@ -10,6 +10,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "db_base.h"
+
 #define REFLECTION(_TABLE_NAME_, ...)                      \
  private:                                                  \
   friend class tinyorm_impl::ReflectionVisitor;            \
@@ -31,7 +33,7 @@
 #define NO_SUCH_FIELD "No such a field"
 #define BAD_TYPE "Invalid Type"
 #define NULL_DESERIALIZE "Cannot deserialize NULL value to a non-nullable value"
-
+#define NOT_THE_SAME_TABLE "Field is not in the same table"
 namespace tinyorm {
 
 /**
@@ -109,6 +111,10 @@ bool operator==(std::nullptr_t, const Nullable<T2>& op2) {
 }
 
 }  // namespace tinyorm
+
+namespace tinyorm{
+class DBManager;
+}
 
 namespace tinyorm_impl {
 /**
@@ -370,11 +376,11 @@ class RelationExpr {
   }
 
   inline RelationExpr operator&&(const RelationExpr& rhs) const {
-    return And_Or(rhs, "and");
+    return And_Or(rhs, " and ");
   }
 
   inline RelationExpr operator||(const RelationExpr& rhs) const {
-    return And_Or(rhs, "or");
+    return And_Or(rhs, " or ");
   }
 
  private:
@@ -508,6 +514,7 @@ inline auto Avg(const Field<T>& field) {
 }
 
 }  // namespace Expression
+
 }  // namespace tinyorm_impl
 
 namespace tinyorm {
@@ -568,9 +575,156 @@ class FieldExtractor {
   }
 };
 
+/**
+ * @brief SQL Constraint
+ * @details NOT NULL. UNIQUE, PRIMARY KEY,  FOREIGN KEY, CHECK, DEFAULT
+ */
+class Constraint
+{
+private:
+  std::string constraint_;
+  std::string field_;
+  friend class DBManager;
+
+  Constraint(std::string&& cstr, std::string field = "")
+    : constraint_(cstr), field_(std::move(field)){}
+public:
+
+  struct CompositeField{
+    std::string fieldName_;
+    const std::string* tableName_;
+    template <typename... Args>
+    CompositeField(const Args&... args):tableName_(nullptr){
+      (Extract(args), ...);
+    }
+  private:
+    template <typename T>
+    void Extract(const tinyorm_impl::Expression::Field<T>& field){
+      if (tableName_ != nullptr && tableName_ != field.tableName_)
+        throw std::runtime_error{NOT_THE_SAME_TABLE};
+      tableName_ = field.tableName_;
+      if(fieldName_.empty()){
+        fieldName_ = field.fieldName_;
+      }else{
+        fieldName_ = fieldName_ + "," + field.fieldName_;
+      }
+    }
+  };
+
+  template <typename T>
+  static inline Constraint Default(const tinyorm_impl::Expression::Field<T>& field, T value){
+    std::ostringstream os;
+    tinyorm_impl::Serializer::Serialize(os << " default ", value);
+    return Constraint{os.str(), field.fieldName_};
+  }
+
+  static inline Constraint Check(const tinyorm_impl::Expression::RelationExpr& expr){
+    return Constraint{"check (" + expr.ToString() + ")"};
+  }
+  
+  template <typename T>
+  static inline Constraint Unique(const tinyorm_impl::Expression::Field<T>& field){
+    return Constraint{"unique (" + field.fieldName_ + ")"};
+  }
+
+  static inline Constraint Unique(const CompositeField& field){
+    return Constraint{"unique (" + field.fieldName_ + ")"};
+  }
+
+  template <typename T>
+  static inline Constraint Reference(const tinyorm_impl::Expression::Field<T>& field,
+      const tinyorm_impl::Expression::Field<T>& refered){
+    return Constraint{std::string ("foreign key (") + field.fieldName_ +
+                ") references " + *(refered.tableName_) +
+                "(" + refered.fieldName_ + ")"};
+  }
+
+  static inline Constraint Reference(const CompositeField& fields,
+      const CompositeField& refereds){
+    return Constraint{std::string ("foreign key (") + fields.fieldName_ +
+                ") references " + *(refereds.tableName_) +
+                "(" + refereds.fieldName_ + ")"};
+  }
+};
+
+/**
+ * @todo 
+ */
+class DBManager
+{
+private:
+  template <typename C>
+  using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
+  std::unique_ptr<DB_Base> dbhandler_;
+
+  template <typename... Args>
+  static void _GetConstraint(std::string& tableFixes,
+    std::unordered_map<std::string, std::string>& fieldFixes,
+    const Args&... args){
+    auto GetConstraintHelper = [&tableFixes, &fieldFixes](const Constraint& cstr){
+      if(!cstr.field_.empty()){
+        fieldFixes[cstr.field_] += cstr.constraint_;
+      }else{
+        tableFixes += (cstr.constraint_ + ",");
+      }
+    };
+    (GetConstraintHelper(args),...);
+  }
+
+public:
+  DBManager(std::unique_ptr<DB_Base>&& db):dbhandler_(std::move(db)){}
+  ~DBManager() = default;
+
+  template <typename C, typename... Args>
+  std::enable_if_t<!HasInjected<C>::value> CreateTbl(const C&, const Args&...){}
+
+  template <typename C, typename... Args>
+  std::enable_if_t<HasInjected<C>::value> CreateTbl(const C& entity, const Args&... cstrs){
+    const auto& fieldNames = tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+    std::unordered_map<std::string, std::string> fieldFixes;
+    [[maybe_unused]]auto addTypeStr = [&fieldNames, &fieldFixes](const auto& arg, size_t idx){
+      constexpr const char* typeStr = tinyorm_impl::TypeString<std::decay_t<decltype(arg)>>::type_string;
+      fieldFixes.emplace(fieldNames[idx], typeStr);
+    };
+    tinyorm_impl::ReflectionVisitor::Visit(entity, [&addTypeStr](const auto&... args){
+      size_t idx = 0;
+      (addTypeStr(args, idx++), ...);
+    });
+
+
+    fieldFixes[fieldNames[0]] += " primary key ";
+    std::string tableFixes;
+    _GetConstraint(tableFixes, fieldFixes, cstrs...);
+
+    std::string strFmt;
+    for(const auto& field : fieldNames){
+      strFmt += (field + fieldFixes[field] + ",");
+    }
+    strFmt += std::move(tableFixes);
+    strFmt.pop_back(); 
+
+    dbhandler_->Execute("create table " 
+      + tinyorm_impl::ReflectionVisitor::TableName(entity) 
+      + "(" + strFmt + ");");
+  }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> DropTbl(const C&){}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> DropTbl(const C& entity){
+    dbhandler_->Execute("drop table " 
+      + tinyorm_impl::ReflectionVisitor::TableName(entity) 
+      + ";");
+  }
+
+};
+
+
 }  // namespace tinyorm
 
 #undef NO_SUCH_FIELD
 #undef NO_REFLECTIONED
 #undef BAD_TYPE
+#undef NOT_THE_SAME_TABLE
 #endif  // TINYORM_H_
