@@ -1,12 +1,14 @@
 #include <gtest/gtest.h>
+
 #include <unordered_map>
+
 #include "tinyorm.h"
 using namespace std;
 using namespace tinyorm;
 using namespace tinyorm_impl;
 using namespace tinyorm_impl::Expression;
 
-unordered_map<string,string> result;
+unordered_map<string, string> result;
 
 class Student {
  public:
@@ -32,12 +34,12 @@ class Teacher {
   REFLECTION("Teacher", ID, Name, Grade, Address, Salary);
 };
 
-class dummy : public DB_Base
-{
-private:
+class dummy : public DB_Base {
+ private:
   string db;
-public:
-  dummy(const string& str):db(str){}
+
+ public:
+  dummy(const string& str) : db(str) {}
   ~dummy() = default;
   void ForeignKeyOn() override {}
   void Execute(const string& cmd) override {
@@ -49,12 +51,13 @@ public:
 
 class TypeSystemUnittest : public ::testing::Test {
   friend class dummy;
+
  public:
   TypeSystemUnittest()
       : s1{"0001", 22, "Jack", "Third", nullptr, 95, 97, 90},
         t1{"0002", "Rose", "Third", nullptr, 1234.56},
         field{s1, t1},
-        dbm{std::unique_ptr<DB_Base>(new dummy("dummy"))}{}
+        dbm{std::unique_ptr<DB_Base>(new dummy("dummy"))} {}
   ~TypeSystemUnittest() = default;
 
  protected:
@@ -63,8 +66,6 @@ class TypeSystemUnittest : public ::testing::Test {
   FieldExtractor field;
   DBManager dbm;
 };
-
-
 
 TEST_F(TypeSystemUnittest, ReflectionTest) {
   EXPECT_EQ(ReflectionVisitor::TableName(s1), string("Student"));
@@ -158,25 +159,34 @@ TEST_F(TypeSystemUnittest, AggregateExpressionTest) {
   EXPECT_EQ(Sum(s1_math).ToString(), string("sum(Student.MathScores)"));
 }
 
-TEST_F(TypeSystemUnittest, DBManagerTest){
-  string create_str = "create table Student("
-                        "ID text primary key ,"
-                        "Age integer default 22,"
-                        "Name text,Grade text,IsMale integer,MathScores integer,ScienceScores integer,EnglishScores integer,"
-                        "check ((Student.Age>20 and Student.Age<30)),"
-                        "unique (MathScores,EnglishScores),"
-                        "foreign key (ID,Name) references Teacher(ID,Name)"
-                      ");";
-  dbm.CreateTbl(s1,
-   Constraint::Default (field(s1.Age), 22),
-   Constraint::Check(field(s1.Age) > 20 && field(s1.Age) < 30),
-   Constraint::Unique(Constraint::CompositeField{field(s1.MathScores), field(s1.EnglishScores)}),
-   Constraint::Reference(Constraint::CompositeField{field(s1.ID), field(s1.Name)}, 
-                        Constraint::CompositeField{field(t1.ID), field(t1.Name)})
-  );
+TEST_F(TypeSystemUnittest, DBManagerTest) {
+  string create_str =
+      "create table Student("
+      "ID text primary key ,"
+      "Age integer default 22,"
+      "Name text,Grade text,IsMale integer,MathScores integer,ScienceScores "
+      "integer,EnglishScores integer,"
+      "check ((Student.Age>20 and Student.Age<30)),"
+      "unique (MathScores,EnglishScores),"
+      "foreign key (ID,Name) references Teacher(ID,Name)"
+      ");";
+  dbm.CreateTbl(s1, Constraint::Default(field(s1.Age), 22),
+                Constraint::Check(field(s1.Age) > 20 && field(s1.Age) < 30),
+                Constraint::Unique(Constraint::CompositeField{
+                    field(s1.MathScores), field(s1.EnglishScores)}),
+                Constraint::Reference(
+                    Constraint::CompositeField{field(s1.ID), field(s1.Name)},
+                    Constraint::CompositeField{field(t1.ID), field(t1.Name)}));
   EXPECT_EQ(result.at("create"), create_str);
   dbm.DropTbl(s1);
   string drop_str = "drop table Student;";
   EXPECT_EQ(result.at("drop"), drop_str);
+  string delete_str = "delete from Student where ID='0001';";
+  dbm.Delete(s1);
+  EXPECT_EQ(result.at("delete"), delete_str);
+  result.erase("delete");
+  dbm.Delete(s1, field(s1.Age) > 20);
+  delete_str = "delete from Student where Student.Age>20;";
+  EXPECT_EQ(result.at("delete"), delete_str);
   result.clear();
 }

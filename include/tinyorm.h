@@ -112,7 +112,7 @@ bool operator==(std::nullptr_t, const Nullable<T2>& op2) {
 
 }  // namespace tinyorm
 
-namespace tinyorm{
+namespace tinyorm {
 class DBManager;
 }
 
@@ -579,147 +579,190 @@ class FieldExtractor {
  * @brief SQL Constraint
  * @details NOT NULL. UNIQUE, PRIMARY KEY,  FOREIGN KEY, CHECK, DEFAULT
  */
-class Constraint
-{
-private:
+class Constraint {
+ private:
   std::string constraint_;
   std::string field_;
   friend class DBManager;
 
   Constraint(std::string&& cstr, std::string field = "")
-    : constraint_(cstr), field_(std::move(field)){}
-public:
+      : constraint_(cstr), field_(std::move(field)) {}
 
-  struct CompositeField{
+ public:
+  struct CompositeField {
     std::string fieldName_;
     const std::string* tableName_;
     template <typename... Args>
-    CompositeField(const Args&... args):tableName_(nullptr){
+    CompositeField(const Args&... args) : tableName_(nullptr) {
       (Extract(args), ...);
     }
-  private:
+
+   private:
     template <typename T>
-    void Extract(const tinyorm_impl::Expression::Field<T>& field){
+    void Extract(const tinyorm_impl::Expression::Field<T>& field) {
       if (tableName_ != nullptr && tableName_ != field.tableName_)
         throw std::runtime_error{NOT_THE_SAME_TABLE};
       tableName_ = field.tableName_;
-      if(fieldName_.empty()){
+      if (fieldName_.empty()) {
         fieldName_ = field.fieldName_;
-      }else{
+      } else {
         fieldName_ = fieldName_ + "," + field.fieldName_;
       }
     }
   };
 
   template <typename T>
-  static inline Constraint Default(const tinyorm_impl::Expression::Field<T>& field, T value){
+  static inline Constraint Default(
+      const tinyorm_impl::Expression::Field<T>& field, T value) {
     std::ostringstream os;
     tinyorm_impl::Serializer::Serialize(os << " default ", value);
     return Constraint{os.str(), field.fieldName_};
   }
 
-  static inline Constraint Check(const tinyorm_impl::Expression::RelationExpr& expr){
+  static inline Constraint Check(
+      const tinyorm_impl::Expression::RelationExpr& expr) {
     return Constraint{"check (" + expr.ToString() + ")"};
   }
-  
+
   template <typename T>
-  static inline Constraint Unique(const tinyorm_impl::Expression::Field<T>& field){
+  static inline Constraint Unique(
+      const tinyorm_impl::Expression::Field<T>& field) {
     return Constraint{"unique (" + field.fieldName_ + ")"};
   }
 
-  static inline Constraint Unique(const CompositeField& field){
+  static inline Constraint Unique(const CompositeField& field) {
     return Constraint{"unique (" + field.fieldName_ + ")"};
   }
 
   template <typename T>
-  static inline Constraint Reference(const tinyorm_impl::Expression::Field<T>& field,
-      const tinyorm_impl::Expression::Field<T>& refered){
-    return Constraint{std::string ("foreign key (") + field.fieldName_ +
-                ") references " + *(refered.tableName_) +
-                "(" + refered.fieldName_ + ")"};
+  static inline Constraint Reference(
+      const tinyorm_impl::Expression::Field<T>& field,
+      const tinyorm_impl::Expression::Field<T>& refered) {
+    return Constraint{std::string("foreign key (") + field.fieldName_ +
+                      ") references " + *(refered.tableName_) + "(" +
+                      refered.fieldName_ + ")"};
   }
 
   static inline Constraint Reference(const CompositeField& fields,
-      const CompositeField& refereds){
-    return Constraint{std::string ("foreign key (") + fields.fieldName_ +
-                ") references " + *(refereds.tableName_) +
-                "(" + refereds.fieldName_ + ")"};
+                                     const CompositeField& refereds) {
+    return Constraint{std::string("foreign key (") + fields.fieldName_ +
+                      ") references " + *(refereds.tableName_) + "(" +
+                      refereds.fieldName_ + ")"};
   }
 };
 
 /**
- * @todo 
+ * @todo
  */
-class DBManager
-{
-private:
+class DBManager {
+ private:
   template <typename C>
   using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
   std::unique_ptr<DB_Base> dbhandler_;
 
   template <typename... Args>
-  static void _GetConstraint(std::string& tableFixes,
-    std::unordered_map<std::string, std::string>& fieldFixes,
-    const Args&... args){
-    auto GetConstraintHelper = [&tableFixes, &fieldFixes](const Constraint& cstr){
-      if(!cstr.field_.empty()){
+  static void _GetConstraint(
+      std::string& tableFixes,
+      std::unordered_map<std::string, std::string>& fieldFixes,
+      const Args&... args) {
+    auto GetConstraintHelper = [&tableFixes,
+                                &fieldFixes](const Constraint& cstr) {
+      if (!cstr.field_.empty()) {
         fieldFixes[cstr.field_] += cstr.constraint_;
-      }else{
+      } else {
         tableFixes += (cstr.constraint_ + ",");
       }
     };
-    (GetConstraintHelper(args),...);
+    (GetConstraintHelper(args), ...);
   }
 
-public:
-  DBManager(std::unique_ptr<DB_Base>&& db):dbhandler_(std::move(db)){}
+ public:
+  DBManager(std::unique_ptr<DB_Base>&& db) : dbhandler_(std::move(db)) {}
   ~DBManager() = default;
 
   template <typename C, typename... Args>
-  std::enable_if_t<!HasInjected<C>::value> CreateTbl(const C&, const Args&...){}
+  std::enable_if_t<!HasInjected<C>::value> CreateTbl(const C&, const Args&...) {
+  }
 
   template <typename C, typename... Args>
-  std::enable_if_t<HasInjected<C>::value> CreateTbl(const C& entity, const Args&... cstrs){
-    const auto& fieldNames = tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+  std::enable_if_t<HasInjected<C>::value> CreateTbl(const C& entity,
+                                                    const Args&... cstrs) {
+    const auto& fieldNames =
+        tinyorm_impl::ReflectionVisitor::FieldNames(entity);
     std::unordered_map<std::string, std::string> fieldFixes;
-    [[maybe_unused]]auto addTypeStr = [&fieldNames, &fieldFixes](const auto& arg, size_t idx){
-      constexpr const char* typeStr = tinyorm_impl::TypeString<std::decay_t<decltype(arg)>>::type_string;
+    [[maybe_unused]] auto addTypeStr = [&fieldNames, &fieldFixes](
+                                           const auto& arg, size_t idx) {
+      constexpr const char* typeStr =
+          tinyorm_impl::TypeString<std::decay_t<decltype(arg)>>::type_string;
       fieldFixes.emplace(fieldNames[idx], typeStr);
     };
-    tinyorm_impl::ReflectionVisitor::Visit(entity, [&addTypeStr](const auto&... args){
-      size_t idx = 0;
-      (addTypeStr(args, idx++), ...);
-    });
-
+    tinyorm_impl::ReflectionVisitor::Visit(entity,
+                                           [&addTypeStr](const auto&... args) {
+                                             size_t idx = 0;
+                                             (addTypeStr(args, idx++), ...);
+                                           });
 
     fieldFixes[fieldNames[0]] += " primary key ";
     std::string tableFixes;
     _GetConstraint(tableFixes, fieldFixes, cstrs...);
 
     std::string strFmt;
-    for(const auto& field : fieldNames){
+    for (const auto& field : fieldNames) {
       strFmt += (field + fieldFixes[field] + ",");
     }
     strFmt += std::move(tableFixes);
-    strFmt.pop_back(); 
+    strFmt.pop_back();
 
-    dbhandler_->Execute("create table " 
-      + tinyorm_impl::ReflectionVisitor::TableName(entity) 
-      + "(" + strFmt + ");");
+    dbhandler_->Execute("create table " +
+                        tinyorm_impl::ReflectionVisitor::TableName(entity) +
+                        "(" + strFmt + ");");
   }
 
   template <typename C>
-  std::enable_if_t<!HasInjected<C>::value> DropTbl(const C&){}
+  std::enable_if_t<!HasInjected<C>::value> DropTbl(const C&) {}
 
   template <typename C>
-  std::enable_if_t<HasInjected<C>::value> DropTbl(const C& entity){
-    dbhandler_->Execute("drop table " 
-      + tinyorm_impl::ReflectionVisitor::TableName(entity) 
-      + ";");
+  std::enable_if_t<HasInjected<C>::value> DropTbl(const C& entity) {
+    dbhandler_->Execute("drop table " +
+                        tinyorm_impl::ReflectionVisitor::TableName(entity) +
+                        ";");
   }
 
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> Delete(const C&) {}
+
+  /**
+   * @brief Delete record according to the primary key.
+   */
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> Delete(const C& entity) {
+    const auto& fieldNames =
+        tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+    std::ostringstream os;
+    os << "delete from " << tinyorm_impl::ReflectionVisitor::TableName(entity)
+       << " where " << fieldNames[0] << "=";
+    tinyorm_impl::ReflectionVisitor::Visit(
+        entity, [&os](const auto& primaryKey, const auto&... dummy) {
+          if (!tinyorm_impl::Serializer::Serialize(os, primaryKey)) {
+            os << "null";
+          }
+        });
+    os << ";";
+    dbhandler_->Execute(os.str());
+  }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> Delete(
+      const C&, const tinyorm_impl::Expression::RelationExpr&) {}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> Delete(
+      const C& entity, const tinyorm_impl::Expression::RelationExpr& expr) {
+    dbhandler_->Execute("delete from " +
+                        tinyorm_impl::ReflectionVisitor::TableName(entity) +
+                        " where " + expr.ToString() + ";");
+  }
 };
-
 
 }  // namespace tinyorm
 
