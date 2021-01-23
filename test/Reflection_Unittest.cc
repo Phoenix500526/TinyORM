@@ -188,5 +188,11 @@ TEST_F(TypeSystemUnittest, DBManagerTest) {
   dbm.Delete(s1, field(s1.Age) > 20);
   delete_str = "delete from Student where Student.Age>20;";
   EXPECT_EQ(result.at("delete"), delete_str);
+  string insert_str = "insert into Student("
+                      "ID,Age,Name,Grade,MathScores,"
+                      "ScienceScores,EnglishScores) values ("
+                      "'0001',22,'Jack','Third',95,97,90);";
+  dbm.Insert(s1);
+  EXPECT_EQ(result.at("insert"), insert_str);
   result.clear();
 }

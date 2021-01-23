@@ -676,6 +676,48 @@ class DBManager {
     (GetConstraintHelper(args), ...);
   }
 
+  template <typename C>
+  static inline void _GetInsert(std::ostream &os, const C& entity, bool withPrimaryKey){
+    tinyorm_impl::ReflectionVisitor::Visit(entity, 
+      [&os, &entity, withPrimaryKey](const auto& primaryKey, const auto&... args){
+        const auto& fieldNames = tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+        os << "insert into "
+           << tinyorm_impl::ReflectionVisitor::TableName(entity)
+           << "(";
+      bool extra_comma = false;
+      std::ostringstream osVal;  //!< Serialize field values.
+      auto serializeField = [&fieldNames, &os, &osVal, &extra_comma](
+        const auto& val, size_t index){
+          if (tinyorm_impl::Serializer::Serialize(osVal, val))
+          {
+            os << fieldNames[index] << ",";
+            osVal << ",";
+            extra_comma = true;
+          }
+        };
+      // insert the primary key
+      if(withPrimaryKey && tinyorm_impl::Serializer::Serialize(osVal, primaryKey)){
+        os << fieldNames[0] << ",";
+        osVal << ",";
+        extra_comma = true;
+      }
+
+      // insert the rest
+      size_t index = 1;
+      (serializeField(args, index++),...);
+
+      if(extra_comma){
+        os.seekp(os.tellp() - std::streamoff(1));
+        osVal.seekp(osVal.tellp() - std::streamoff(1));
+      }else{
+        os << fieldNames[0];
+        osVal << "null";
+      }
+      osVal << ");";
+      os << ") values (" << osVal.str();
+      });
+  }
+
  public:
   DBManager(std::unique_ptr<DB_Base>&& db) : dbhandler_(std::move(db)) {}
   ~DBManager() = default;
@@ -761,6 +803,31 @@ class DBManager {
     dbhandler_->Execute("delete from " +
                         tinyorm_impl::ReflectionVisitor::TableName(entity) +
                         " where " + expr.ToString() + ";");
+  }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> Insert(const C&, bool = true){}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> Insert(const C& entity, bool withPrimaryKey = true){
+    std::ostringstream os;
+    _GetInsert(os, entity, withPrimaryKey);
+    dbhandler_->Execute(os.str());
+  }
+
+  template <typename In, typename C = typename In::value_type>
+  std::enable_if_t<!HasInjected<C>::value> InsertRange(const In&, bool);
+
+  template <typename In, typename C = typename In::value_type>
+  std::enable_if_t<HasInjected<C>::value> InsertRange(const In& entities, bool withPrimaryKey = true){
+    std::ostringstream os;
+    if(!entities.empty()){
+      for (const auto& entity : entities)
+      {
+        _GetInsert(os, entity, withPrimaryKey);
+      }
+      dbhandler_->Execute(os.str());
+    }
   }
 };
 
