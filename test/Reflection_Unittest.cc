@@ -188,11 +188,71 @@ TEST_F(TypeSystemUnittest, DBManagerTest) {
   dbm.Delete(s1, field(s1.Age) > 20);
   delete_str = "delete from Student where Student.Age>20;";
   EXPECT_EQ(result.at("delete"), delete_str);
-  string insert_str = "insert into Student("
-                      "ID,Age,Name,Grade,MathScores,"
-                      "ScienceScores,EnglishScores) values ("
-                      "'0001',22,'Jack','Third',95,97,90);";
+  string insert_str =
+      "insert into Student("
+      "ID,Age,Name,Grade,MathScores,"
+      "ScienceScores,EnglishScores) values ("
+      "'0001',22,'Jack','Third',95,97,90);";
   dbm.Insert(s1);
   EXPECT_EQ(result.at("insert"), insert_str);
+
+  string update_str =
+      "update Student "
+      "set Age=24,Name='Narutal',Grade='1-st',IsMale=null,"
+      "MathScores=60,ScienceScores=60,EnglishScores=60 "
+      "where Student.ID='0002';";
+  Student s2{"0002", 24, "Narutal", "1-st", nullptr, 60, 60, 60};
+  dbm.Update(s2);
+  EXPECT_EQ(result.at("update"), update_str);
+  result.erase("update");
+  update_str =
+      "update Student "
+      "set Age=27,Name='Phoenix',Grade='3-th',IsMale=1 "
+      "where Student.ID='0001';";
+  dbm.Update(s1,
+             (field(s1.Age) = 27) && (field(s1.Name) = "Phoenix") &&
+                 (field(s1.Grade) = "3-th") && (field(s1.IsMale) = 1),
+             (field(s1.ID) == string("0001")));
+  EXPECT_EQ(result.at("update"), update_str);
   result.clear();
+}
+
+TEST_F(TypeSystemUnittest, RangeOperationTest) {
+  vector<Student> vec = {{"0003", 21, "Rose", "1-st", false, 90, 92, 93},
+                         {"0004", 25, "Dick", "3-th", nullptr, 92, 93, 94}};
+  string insert_str =
+      "insert into Student("
+      "ID,Age,Name,Grade,IsMale,MathScores,"
+      "ScienceScores,EnglishScores) values ("
+      "'0003',21,'Rose','1-st',0,90,92,93);"
+      "insert into Student("
+      "ID,Age,Name,Grade,MathScores,"
+      "ScienceScores,EnglishScores) values ("
+      "'0004',25,'Dick','3-th',92,93,94);";
+  dbm.InsertRange(vec);
+  EXPECT_EQ(result.at("insert"), insert_str);
+  vec[0].Age = 24;
+  vec[0].Name = "Narutal";
+  vec[0].IsMale = true;
+  vec[0].MathScores = 60;
+  vec[0].ScienceScores = 60;
+  vec[0].EnglishScores = 60;
+
+  vec[1].Age = 27;
+  vec[1].Name = "Phoenix";
+  vec[1].IsMale = true;
+  vec[1].MathScores = 100;
+  vec[1].ScienceScores = 100;
+  vec[1].EnglishScores = 100;
+  string update_str =
+      "update Student "
+      "set Age=24,Name='Narutal',Grade='1-st',IsMale=1,"
+      "MathScores=60,ScienceScores=60,EnglishScores=60 "
+      "where Student.ID='0003';"
+      "update Student "
+      "set Age=27,Name='Phoenix',Grade='3-th',IsMale=1,"
+      "MathScores=100,ScienceScores=100,EnglishScores=100 "
+      "where Student.ID='0004';";
+  dbm.UpdateRange(vec);
+  EXPECT_EQ(result.at("update"), update_str);
 }

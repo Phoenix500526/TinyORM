@@ -677,45 +677,77 @@ class DBManager {
   }
 
   template <typename C>
-  static inline void _GetInsert(std::ostream &os, const C& entity, bool withPrimaryKey){
-    tinyorm_impl::ReflectionVisitor::Visit(entity, 
-      [&os, &entity, withPrimaryKey](const auto& primaryKey, const auto&... args){
-        const auto& fieldNames = tinyorm_impl::ReflectionVisitor::FieldNames(entity);
-        os << "insert into "
-           << tinyorm_impl::ReflectionVisitor::TableName(entity)
-           << "(";
-      bool extra_comma = false;
-      std::ostringstream osVal;  //!< Serialize field values.
-      auto serializeField = [&fieldNames, &os, &osVal, &extra_comma](
-        const auto& val, size_t index){
-          if (tinyorm_impl::Serializer::Serialize(osVal, val))
-          {
-            os << fieldNames[index] << ",";
+  static inline void _GetInsert(std::ostream& os, const C& entity,
+                                bool withPrimaryKey) {
+    tinyorm_impl::ReflectionVisitor::Visit(
+        entity, [&os, &entity, withPrimaryKey](const auto& primaryKey,
+                                               const auto&... args) {
+          const auto& fieldNames =
+              tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+          os << "insert into "
+             << tinyorm_impl::ReflectionVisitor::TableName(entity) << "(";
+          bool extra_comma = false;
+          std::ostringstream osVal;  //!< Serialize field values.
+          auto serializeField = [&fieldNames, &os, &osVal, &extra_comma](
+                                    const auto& val, size_t index) {
+            if (tinyorm_impl::Serializer::Serialize(osVal, val)) {
+              os << fieldNames[index] << ",";
+              osVal << ",";
+              extra_comma = true;
+            }
+          };
+          // insert the primary key
+          if (withPrimaryKey &&
+              tinyorm_impl::Serializer::Serialize(osVal, primaryKey)) {
+            os << fieldNames[0] << ",";
             osVal << ",";
             extra_comma = true;
           }
-        };
-      // insert the primary key
-      if(withPrimaryKey && tinyorm_impl::Serializer::Serialize(osVal, primaryKey)){
-        os << fieldNames[0] << ",";
-        osVal << ",";
-        extra_comma = true;
-      }
 
-      // insert the rest
-      size_t index = 1;
-      (serializeField(args, index++),...);
+          // insert the rest
+          size_t index = 1;
+          (serializeField(args, index++), ...);
 
-      if(extra_comma){
-        os.seekp(os.tellp() - std::streamoff(1));
-        osVal.seekp(osVal.tellp() - std::streamoff(1));
-      }else{
-        os << fieldNames[0];
-        osVal << "null";
-      }
-      osVal << ");";
-      os << ") values (" << osVal.str();
-      });
+          if (extra_comma) {
+            os.seekp(os.tellp() - std::streamoff(1));
+            osVal.seekp(osVal.tellp() - std::streamoff(1));
+          } else {
+            os << fieldNames[0];
+            osVal << "null";
+          }
+          osVal << ");";
+          os << ") values (" << osVal.str();
+        });
+  }
+
+  template <typename C>
+  static inline bool _GetUpdate(std::ostream& os, const C& entity) {
+    return tinyorm_impl::ReflectionVisitor::Visit(
+        entity, [&os, &entity](const auto& primaryKey, const auto&... args) {
+          if (sizeof...(args) == 0) return false;
+          const auto& fieldNames =
+              tinyorm_impl::ReflectionVisitor::FieldNames(entity);
+          const auto& tableName =
+              tinyorm_impl::ReflectionVisitor::TableName(entity);
+          os << "update " << tableName << " set ";
+
+          auto serializeField = [&fieldNames, &os](const auto& val,
+                                                   size_t index) {
+            os << fieldNames[index] << "=";
+            if (!tinyorm_impl::Serializer::Serialize(os, val)) os << "null";
+            os << ",";
+          };
+
+          size_t idx = 1;
+          (serializeField(args, idx++), ...);
+          os.seekp(os.tellp() - std::streamoff(1));
+
+          os << " where " << tableName << "." << fieldNames[0] << "=";
+          if (!tinyorm_impl::Serializer::Serialize(os, primaryKey))
+            os << "null";
+          os << ";";
+          return true;
+        });
   }
 
  public:
@@ -806,10 +838,11 @@ class DBManager {
   }
 
   template <typename C>
-  std::enable_if_t<!HasInjected<C>::value> Insert(const C&, bool = true){}
+  std::enable_if_t<!HasInjected<C>::value> Insert(const C&, bool = true) {}
 
   template <typename C>
-  std::enable_if_t<HasInjected<C>::value> Insert(const C& entity, bool withPrimaryKey = true){
+  std::enable_if_t<HasInjected<C>::value> Insert(const C& entity,
+                                                 bool withPrimaryKey = true) {
     std::ostringstream os;
     _GetInsert(os, entity, withPrimaryKey);
     dbhandler_->Execute(os.str());
@@ -819,15 +852,56 @@ class DBManager {
   std::enable_if_t<!HasInjected<C>::value> InsertRange(const In&, bool);
 
   template <typename In, typename C = typename In::value_type>
-  std::enable_if_t<HasInjected<C>::value> InsertRange(const In& entities, bool withPrimaryKey = true){
+  std::enable_if_t<HasInjected<C>::value> InsertRange(
+      const In& entities, bool withPrimaryKey = true) {
     std::ostringstream os;
-    if(!entities.empty()){
-      for (const auto& entity : entities)
-      {
+    if (!entities.empty()) {
+      for (const auto& entity : entities) {
         _GetInsert(os, entity, withPrimaryKey);
       }
       dbhandler_->Execute(os.str());
     }
+  }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> Update(const C&) {}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> Update(const C& entity) {
+    std::ostringstream os;
+    if (_GetUpdate(os, entity)) dbhandler_->Execute(os.str());
+  }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value> Update(
+      const C&, const tinyorm_impl::Expression::AssignmentExpr&,
+      const tinyorm_impl::Expression::RelationExpr&) {}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value> Update(
+      const C& entity,
+      const tinyorm_impl::Expression::AssignmentExpr& assignClause,
+      const tinyorm_impl::Expression::RelationExpr& whereClause) {
+    dbhandler_->Execute("update " +
+                        tinyorm_impl::ReflectionVisitor::TableName(entity) +
+                        " set " + assignClause.ToString() + " where " +
+                        whereClause.ToString() + ";");
+  }
+
+  template <typename In, typename C = typename In::value_type>
+  std::enable_if_t<!HasInjected<C>::value> UpdateRange(const In&) {}
+
+  template <typename In, typename C = typename In::value_type>
+  std::enable_if_t<HasInjected<C>::value> UpdateRange(const In& entities) {
+    std::ostringstream os, osTmp;
+    for (const auto& entity : entities) {
+      if (_GetUpdate(osTmp, entity)) {
+        os << osTmp.str();
+        osTmp.str("");
+      }
+    }
+    auto sql = os.str();
+    if (!sql.empty()) dbhandler_->Execute(sql);
   }
 };
 
