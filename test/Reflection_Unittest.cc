@@ -45,7 +45,13 @@ class dummy : public DB_Base {
   void Execute(const string& cmd) override {
     size_t first_space = cmd.find_first_of(' ');
     string str = std::move(cmd.substr(0, first_space));
-    result.emplace(str, cmd);
+    // result.emplace(str, cmd);
+    result[str] = cmd;
+  }
+
+  void ExecuteCallback(const string& cmd,
+                       std::function<void(int, char**)> callback) {
+    Execute(cmd);
   }
 };
 
@@ -54,8 +60,8 @@ class TypeSystemUnittest : public ::testing::Test {
 
  public:
   TypeSystemUnittest()
-      : s1{"0001", 22, "Jack", "Third", nullptr, 95, 97, 90},
-        t1{"0002", "Rose", "Third", nullptr, 1234.56},
+      : s1{"0001", 22, "Jack", "2-nd", nullptr, 95, 97, 90},
+        t1{"0002", "Rose", "2-nd", nullptr, 1234.56},
         field{s1, t1},
         dbm{std::unique_ptr<DB_Base>(new dummy("dummy"))} {}
   ~TypeSystemUnittest() = default;
@@ -192,7 +198,7 @@ TEST_F(TypeSystemUnittest, DBManagerTest) {
       "insert into Student("
       "ID,Age,Name,Grade,MathScores,"
       "ScienceScores,EnglishScores) values ("
-      "'0001',22,'Jack','Third',95,97,90);";
+      "'0001',22,'Jack','2-nd',95,97,90);";
   dbm.Insert(s1);
   EXPECT_EQ(result.at("insert"), insert_str);
 
@@ -255,4 +261,68 @@ TEST_F(TypeSystemUnittest, RangeOperationTest) {
       "where Student.ID='0004';";
   dbm.UpdateRange(vec);
   EXPECT_EQ(result.at("update"), update_str);
+}
+
+TEST_F(TypeSystemUnittest, QueryTest) {
+  string select_sql = "select distinct * from Student;";
+  dbm.Query(Student{}).Distinct().ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+  select_sql =
+      "select Student.MathScores,Student.ScienceScores,Student.EnglishScores "
+      "from Student where (Student.ID='0001');";
+  dbm.Query(Student{})
+      .Select(field(s1.MathScores), field(s1.ScienceScores),
+              field(s1.EnglishScores))
+      .Where(field(s1.ID) == string("0001"))
+      .ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+
+  select_sql =
+      "select Student.MathScores,Student.ScienceScores,Student.EnglishScores "
+      "from Student where (Student.ID='0001') limit 10 offset 3;";
+  dbm.Query(Student{})
+      .Select(field(s1.MathScores), field(s1.ScienceScores),
+              field(s1.EnglishScores))
+      .Where(field(s1.ID) == string("0001"))
+      .Limit(10)
+      .Offset(3)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+
+  select_sql =
+      "select Student.MathScores,Student.ScienceScores,Student.EnglishScores "
+      "from Student limit ~0 offset 3;";
+  dbm.Query(Student{})
+      .Select(field(s1.MathScores), field(s1.ScienceScores),
+              field(s1.EnglishScores))
+      .Offset(3)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+
+  select_sql =
+      "select Student.MathScores,Student.ScienceScores,Student.EnglishScores "
+      "from Student group by Student.Grade,Student.IsMale having "
+      "(sum(Student.MathScores)>=75 "
+      "and "
+      "(Student.Grade='1-st' or Student.Grade='2-nd'));";
+  dbm.Query(Student{})
+      .Select(field(s1.MathScores), field(s1.ScienceScores),
+              field(s1.EnglishScores))
+      .GroupBy(field(s1.Grade), field(s1.IsMale))
+      .Having(Sum(field(s1.MathScores)) >= 75 &&
+              (field(s1.Grade) == string("1-st") ||
+               field(s1.Grade) == string("2-nd")))
+      .ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+
+  select_sql = "select * from Student order by Student.MathScores,Student.Age;";
+  dbm.Query(Student{}).OrderBy(field(s1.MathScores), field(s1.Age)).ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
+
+  select_sql =
+      "select * from Student order by Student.MathScores,Student.Age desc;";
+  dbm.Query(Student{})
+      .OrderByDescending(field(s1.MathScores), field(s1.Age))
+      .ToVector();
+  EXPECT_EQ(result.at("select"), select_sql);
 }

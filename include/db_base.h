@@ -1,12 +1,16 @@
 #ifndef TINYORM_DB_BASE_H_
 #define TINYORM_DB_BASE_H_
 
+#include <functional>
+
 namespace tinyorm {
 
 class DB_Base {
  public:
   virtual void ForeignKeyOn() = 0;
-  virtual void Execute(const std::string& cmd) = 0;
+  virtual void Execute(const std::string&) = 0;
+  virtual void ExecuteCallback(const std::string&,
+                               std::function<void(int, char**)>) = 0;
   virtual ~DB_Base() {}
 };
 
@@ -24,6 +28,10 @@ class DB_Sqlite : public DB_Base {
   ~DB_Sqlite() {}
   void ForeignKeyOn() override { std::cout << "ForeignKeyOn" << std::endl; }
   void Execute(const std::string& cmd) override {
+    std::cout << cmd << std::endl;
+  }
+  void ExecuteCallback(const std::string& cmd,
+                       std::function<void(int, char**)> callback) {
     std::cout << cmd << std::endl;
   }
 };

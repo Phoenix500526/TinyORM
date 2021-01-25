@@ -34,6 +34,7 @@
 #define BAD_TYPE "Invalid Type"
 #define NULL_DESERIALIZE "Cannot deserialize NULL value to a non-nullable value"
 #define NOT_THE_SAME_TABLE "Field is not in the same table"
+#define BAD_COLUMN_COUNT "Bad Column Count"
 namespace tinyorm {
 
 /**
@@ -514,7 +515,6 @@ inline auto Avg(const Field<T>& field) {
 }
 
 }  // namespace Expression
-
 }  // namespace tinyorm_impl
 
 namespace tinyorm {
@@ -651,6 +651,307 @@ class Constraint {
   }
 };
 
+template <typename Result>
+class QueryResult;
+}  // namespace tinyorm
+
+namespace tinyorm_impl {
+
+class QueryHelper {
+  template <typename T>
+  using Nullable = tinyorm::Nullable<T>;
+
+  template <typename T>
+  using Selectable = tinyorm_impl::Expression::FieldBase<T>;
+
+  template <typename T>
+  struct TypeToNullable {
+    using type = Nullable<T>;
+  };
+
+  template <typename T>
+  struct TypeToNullable<Nullable<T>> : public TypeToNullable<T> {};
+
+  template <typename T>
+  friend class tinyorm::QueryResult;
+
+  template <typename Fn, typename TupleType>
+  static inline void TupleVisit(TupleType& tuple, Fn&& fn) {
+    auto func = [&fn](auto&&... args) { ((fn(args)), ...); };
+    std::apply(func, tuple);
+  }
+
+  template <typename... Args>
+  static inline auto FieldsToNullable(Args...) {
+    return std::tuple<typename TypeToNullable<Args>::type...>{};
+  }
+
+  template <typename C>
+  static inline auto QueryResultToTuple(const C& entity) {
+    return tinyorm_impl::ReflectionVisitor::Visit(
+        entity, [](auto... args) { return FieldsToNullable(args...); });
+  }
+
+  template <typename... Args>
+  static inline auto JoinToTuple(const Args&... args) {
+    return decltype(std::tuple_cat(QueryResultToTuple(args)...)){};
+  }
+
+  template <typename T>
+  static inline auto SelectableToTuple(const Selectable<T>&) {
+    return Nullable<T>{};
+  }
+
+  template <typename... Args>
+  static inline auto SelectToTuple(const Args&... args) {
+    return std::tuple<decltype(SelectableToTuple(args))...>{};
+  }
+
+  template <typename T>
+  static inline std::string FieldToSql(const Selectable<T>& op) {
+    if (op.tableName_)
+      return (*op.tableName_) + "." + op.fieldName_;
+    else
+      return op.fieldName_;
+  }
+
+  template <typename T, typename... Args>
+  static inline std::string FieldToSql(const Selectable<T>& arg,
+                                       const Args&... args) {
+    return FieldToSql(arg) + "," + FieldToSql(args...);
+  }
+};
+
+}  // namespace tinyorm_impl
+
+namespace tinyorm {
+
+template <typename Result>
+class QueryResult {
+ private:
+  template <typename C>
+  using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
+
+  template <typename Q>
+  friend class QueryResult;
+  friend class DBManager;
+
+  std::shared_ptr<tinyorm::DB_Base> dbhandler_;
+  Result _queryHelper;
+  std::string _sqlFrom;
+  std::string _sqlTarget;
+  std::string _sqlSelect;
+  std::string _sqlWhere;
+  std::string _sqlGroupBy;
+  std::string _sqlHaving;
+  std::string _sqlOrderBy;
+  std::string _sqlLimit;
+  std::string _sqlOffset;
+
+  QueryResult(std::shared_ptr<tinyorm::DB_Base> db_ptr, Result queryHelper,
+              std::string sqlFrom, std::string sqlSelect = "select ",
+              std::string sqlTarget = "*", std::string sqlWhere = std::string{},
+              std::string sqlGroupBy = std::string{},
+              std::string sqlHaving = std::string{},
+              std::string sqlOrderBy = std::string{},
+              std::string sqlLimit = std::string{},
+              std::string sqlOffset = std::string{})
+      : dbhandler_(db_ptr),
+        _queryHelper(queryHelper),
+        _sqlFrom(sqlFrom),
+        _sqlTarget(sqlTarget),
+        _sqlSelect(sqlSelect),
+        _sqlWhere(sqlWhere),
+        _sqlGroupBy(sqlGroupBy),
+        _sqlHaving(sqlHaving),
+        _sqlOrderBy(sqlOrderBy),
+        _sqlLimit(sqlLimit),
+        _sqlOffset(sqlOffset) {}
+
+  inline std::string _GetFromSql() const {
+    return _sqlFrom + _sqlWhere + _sqlGroupBy + _sqlHaving;
+  }
+
+  inline std::string _GetLimit() const {
+    return _sqlOrderBy + _sqlLimit + _sqlOffset;
+  }
+
+  // Select for Normal Objects
+  template <typename C, typename Out>
+  inline void _Select(const C&, Out& out) const {
+    auto copy = _queryHelper;
+    dbhandler_->ExecuteCallback(
+        _sqlSelect + _sqlTarget + _GetFromSql() + _GetLimit() + ";",
+        [&copy, &out](int argc, char** argv) {
+          tinyorm_impl::ReflectionVisitor::Visit(copy, [argc](auto&... args) {
+            if (sizeof...(args) != argc)
+              throw std::runtime_error(BAD_COLUMN_COUNT);
+          });
+          tinyorm_impl::ReflectionVisitor::Visit(copy, [argv](auto&... args) {
+            size_t idx = 0;
+            ((tinyorm_impl::Deserializer::Deserialize(args, argv[idx++])), ...);
+          });
+          out.push_back(std::move(copy));
+        });
+  }
+
+  // Select for Tuples
+  template <typename Out, typename... Args>
+  inline void _Select(const std::tuple<Args...>&, Out& out) const {
+    auto copy = _queryHelper;
+    dbhandler_->ExecuteCallback(
+        _sqlSelect + _sqlTarget + _GetFromSql() + _GetLimit() + ";",
+        [&copy, &out](int argc, char** argv) {
+          if (sizeof...(Args) != argc)
+            throw std::runtime_error(BAD_COLUMN_COUNT);
+          size_t idx = 0;
+          tinyorm_impl::QueryHelper::TupleVisit(copy, [argv, &idx](auto& val) {
+            tinyorm_impl::Deserializer::Deserialize(val, argv[idx++]);
+          });
+          out.push_back(copy);
+        });
+  }
+
+  template <typename... Args>
+  inline QueryResult<std::tuple<Args...>> _NewQuery(
+      std::string sqlTarget, std::string sqlFrom,
+      std::tuple<Args...>&& newQueryHelper) const {
+    return QueryResult<std::tuple<Args...>>(
+        dbhandler_, newQueryHelper, std::move(sqlFrom), _sqlSelect,
+        std::move(sqlTarget), _sqlWhere, _sqlGroupBy, _sqlHaving, _sqlOrderBy,
+        _sqlLimit, _sqlOffset);
+  }
+
+ public:
+  template <typename... Args>
+  inline auto Select(const Args&... args) const {
+    return _NewQuery(tinyorm_impl::QueryHelper::FieldToSql(args...), _sqlFrom,
+                     tinyorm_impl::QueryHelper::SelectToTuple(args...));
+  }
+
+  inline QueryResult Distinct() const& {
+    auto ret = *this;
+    ret._sqlSelect = "select distinct ";
+    return ret;
+  }
+
+  inline QueryResult Distinct() && {
+    this->_sqlSelect = "select distinct ";
+    return std::move(*this);
+  }
+
+  // Where Clause
+  inline QueryResult Where(
+      const tinyorm_impl::Expression::RelationExpr& expr) const& {
+    auto ret = *this;
+    ret._sqlWhere = " where (" + expr.ToString() + ")";
+    return ret;
+  }
+
+  inline QueryResult Where(
+      const tinyorm_impl::Expression::RelationExpr& expr) && {
+    this->_sqlWhere = " where (" + expr.ToString() + ")";
+    return std::move(*this);
+  }
+
+  // Limit Clause
+  inline QueryResult Limit(size_t count) const& {
+    auto ret = *this;
+    ret._sqlLimit = " limit " + std::to_string(count);
+    return ret;
+  }
+
+  inline QueryResult Limit(size_t count) && {
+    this->_sqlLimit = " limit " + std::to_string(count);
+    return std::move(*this);
+  }
+
+  // Offset Clause
+  inline QueryResult Offset(size_t count) const& {
+    auto ret = *this;
+    if (ret._sqlLimit.empty()) ret._sqlLimit = " limit ~0";
+    ret._sqlOffset = " offset " + std::to_string(count);
+    return ret;
+  }
+
+  inline QueryResult Offset(size_t count) && {
+    if (this->_sqlLimit.empty()) this->_sqlLimit = " limit ~0";
+    this->_sqlOffset = " offset " + std::to_string(count);
+    return std::move(*this);
+  }
+
+  // Group By Clause
+  template <typename... Args>
+  inline QueryResult GroupBy(const Args&... args) const& {
+    auto ret = *this;
+    ret._sqlGroupBy =
+        " group by " + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    return ret;
+  }
+
+  template <typename... Args>
+  inline QueryResult GroupBy(const Args&... args) && {
+    this->_sqlGroupBy =
+        " group by " + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    return std::move(*this);
+  }
+
+  // Having Clause
+  inline QueryResult Having(
+      const tinyorm_impl::Expression::RelationExpr& expr) const& {
+    auto ret = *this;
+    ret._sqlHaving = " having " + expr.ToString();
+    return ret;
+  }
+
+  inline QueryResult Having(
+      const tinyorm_impl::Expression::RelationExpr& expr) && {
+    this->_sqlHaving = " having " + expr.ToString();
+    return std::move(*this);
+  }
+
+  template <typename... Args>
+  inline QueryResult OrderBy(const Args&... args) const& {
+    auto ret = *this;
+    if (ret._sqlOrderBy.empty())
+      ret._sqlOrderBy =
+          " order by " + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    else
+      ret._sqlOrderBy += "," + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    return ret;
+  }
+
+  template <typename... Args>
+  inline QueryResult OrderBy(const Args&... args) && {
+    if (this->_sqlOrderBy.empty())
+      this->_sqlOrderBy =
+          " order by " + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    else
+      this->_sqlOrderBy += "," + tinyorm_impl::QueryHelper::FieldToSql(args...);
+    return std::move(*this);
+  }
+
+  template <typename... Args>
+  inline QueryResult OrderByDescending(const Args&... args) const& {
+    auto ret = std::move(this)->OrderBy(args...);
+    ret._sqlOrderBy += " desc";
+    return std::move(ret);
+  }
+
+  template <typename... Args>
+  inline QueryResult OrderByDescending(const Args&... args) && {
+    auto ret = this->OrderBy(args...);
+    ret._sqlOrderBy += " desc";
+    return std::move(ret);
+  }
+
+  std::vector<Result> ToVector() const {
+    std::vector<Result> ret;
+    _Select(_queryHelper, ret);
+    return ret;
+  }
+};
+
 /**
  * @todo
  */
@@ -658,7 +959,7 @@ class DBManager {
  private:
   template <typename C>
   using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
-  std::unique_ptr<DB_Base> dbhandler_;
+  std::shared_ptr<DB_Base> dbhandler_;
 
   template <typename... Args>
   static void _GetConstraint(
@@ -751,7 +1052,7 @@ class DBManager {
   }
 
  public:
-  DBManager(std::unique_ptr<DB_Base>&& db) : dbhandler_(std::move(db)) {}
+  DBManager(std::shared_ptr<DB_Base>&& db) : dbhandler_(std::move(db)) {}
   ~DBManager() = default;
 
   template <typename C, typename... Args>
@@ -903,6 +1204,17 @@ class DBManager {
     auto sql = os.str();
     if (!sql.empty()) dbhandler_->Execute(sql);
   }
+
+  template <typename C>
+  std::enable_if_t<!HasInjected<C>::value, QueryResult<C>> Query(const C&) {}
+
+  template <typename C>
+  std::enable_if_t<HasInjected<C>::value, QueryResult<C>> Query(C queryHelper) {
+    return QueryResult<C>(
+        dbhandler_, std::move(queryHelper),
+        std::string(" from ") +
+            tinyorm_impl::ReflectionVisitor::TableName(queryHelper));
+  }
 };
 
 }  // namespace tinyorm
@@ -911,4 +1223,5 @@ class DBManager {
 #undef NO_REFLECTIONED
 #undef BAD_TYPE
 #undef NOT_THE_SAME_TABLE
+#undef BAD_COLUMN_COUNT
 #endif  // TINYORM_H_
