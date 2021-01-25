@@ -822,6 +822,19 @@ class QueryResult {
         _sqlLimit, _sqlOffset);
   }
 
+  template <typename C>
+  inline auto _NewJoinQuery(
+      const C& queryHelper2,
+      const tinyorm_impl::Expression::RelationExpr& onExpr,
+      std::string joinStr) const {
+    return _NewQuery(
+        _sqlTarget,
+        _sqlFrom + std::move(joinStr) +
+            tinyorm_impl::ReflectionVisitor::TableName(queryHelper2) + " on " +
+            onExpr.ToString(),
+        tinyorm_impl::QueryHelper::JoinToTuple(_queryHelper, queryHelper2));
+  }
+
  public:
   template <typename... Args>
   inline auto Select(const Args&... args) const {
@@ -943,6 +956,30 @@ class QueryResult {
     auto ret = this->OrderBy(args...);
     ret._sqlOrderBy += " desc";
     return std::move(ret);
+  }
+
+  template <typename C>
+  inline auto Join(const C&, const tinyorm_impl::Expression::RelationExpr&,
+                   std::enable_if_t<!HasInjected<C>::value>* = nullptr) const {}
+
+  template <typename C>
+  inline auto Join(const C& queryHelper2,
+                   const tinyorm_impl::Expression::RelationExpr& onExpr,
+                   std::enable_if_t<HasInjected<C>::value>* = nullptr) const {
+    return _NewJoinQuery(queryHelper2, onExpr, " join ");
+  }
+
+  template <typename C>
+  inline auto LeftJoin(
+      const C&, const tinyorm_impl::Expression::RelationExpr&,
+      std::enable_if_t<!HasInjected<C>::value>* = nullptr) const {}
+
+  template <typename C>
+  inline auto LeftJoin(
+      const C& queryHelper2,
+      const tinyorm_impl::Expression::RelationExpr& onExpr,
+      std::enable_if_t<HasInjected<C>::value>* = nullptr) const {
+    return _NewJoinQuery(queryHelper2, onExpr, " left join ");
   }
 
   std::vector<Result> ToVector() const {

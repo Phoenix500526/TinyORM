@@ -326,3 +326,19 @@ TEST_F(TypeSystemUnittest, QueryTest) {
       .ToVector();
   EXPECT_EQ(result.at("select"), select_sql);
 }
+
+TEST_F(TypeSystemUnittest, InterTableSelect) {
+  string join_str =
+      "select * from Student join Teacher on Student.Grade=Teacher.Grade;";
+  dbm.Query(Student{})
+      .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+      .ToVector();
+  EXPECT_EQ(result.at("select"), join_str);
+
+  join_str =
+      "select * from Teacher left join Student on Teacher.Grade=Student.Grade;";
+  dbm.Query(Teacher{})
+      .LeftJoin(Student{}, field(t1.Grade) == field(s1.Grade))
+      .ToVector();
+  EXPECT_EQ(result.at("select"), join_str);
+}
