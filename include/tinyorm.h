@@ -835,6 +835,18 @@ class QueryResult {
         tinyorm_impl::QueryHelper::JoinToTuple(_queryHelper, queryHelper2));
   }
 
+  QueryResult _NewCompoundQuery(const QueryResult& queryResult,
+                                std::string compoundStr) const {
+    auto ret = *this;
+    ret._sqlFrom = ret._GetFromSql() + std::move(compoundStr) +
+                   queryResult._sqlSelect + queryResult._sqlTarget +
+                   queryResult._GetFromSql();
+    ret._sqlWhere.clear();
+    ret._sqlGroupBy.clear();
+    ret._sqlHaving.clear();
+    return ret;
+  }
+
  public:
   template <typename... Args>
   inline auto Select(const Args&... args) const {
@@ -980,6 +992,22 @@ class QueryResult {
       const tinyorm_impl::Expression::RelationExpr& onExpr,
       std::enable_if_t<HasInjected<C>::value>* = nullptr) const {
     return _NewJoinQuery(queryHelper2, onExpr, " left join ");
+  }
+
+  inline QueryResult Union(const QueryResult& queryResult) const {
+    return _NewCompoundQuery(queryResult, " union ");
+  }
+
+  inline QueryResult UnionAll(QueryResult& queryResult) const {
+    return _NewCompoundQuery(queryResult, " union all ");
+  }
+
+  inline QueryResult Intersect(QueryResult& queryResult) const {
+    return _NewCompoundQuery(queryResult, " intersect ");
+  }
+
+  inline QueryResult Except(QueryResult& queryResult) const {
+    return _NewCompoundQuery(queryResult, " except ");
   }
 
   std::vector<Result> ToVector() const {

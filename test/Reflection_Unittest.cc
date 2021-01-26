@@ -341,4 +341,54 @@ TEST_F(TypeSystemUnittest, InterTableSelect) {
       .LeftJoin(Student{}, field(t1.Grade) == field(s1.Grade))
       .ToVector();
   EXPECT_EQ(result.at("select"), join_str);
+
+  string union_str =
+      "select * from Student join Teacher "
+      "on Student.Grade=Teacher.Grade "
+      "union "
+      "select * from Student left join Teacher "
+      "on Student.Grade=Teacher.Grade;";
+  auto joinedQuery = dbm.Query(Student{}).LeftJoin(
+      Teacher{}, field(s1.Grade) == field(t1.Grade));
+  dbm.Query(Student{})
+      .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+      .Union(joinedQuery)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), union_str);
+
+  union_str =
+      "select * from Student join Teacher "
+      "on Student.Grade=Teacher.Grade "
+      "union all "
+      "select * from Student left join Teacher "
+      "on Student.Grade=Teacher.Grade;";
+  dbm.Query(Student{})
+      .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+      .UnionAll(joinedQuery)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), union_str);
+
+  string intersect_str =
+      "select * from Student join Teacher "
+      "on Student.Grade=Teacher.Grade "
+      "intersect "
+      "select * from Student left join Teacher "
+      "on Student.Grade=Teacher.Grade;";
+  dbm.Query(Student{})
+      .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+      .Intersect(joinedQuery)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), intersect_str);
+
+  string except_str =
+      "select * from Student join Teacher "
+      "on Student.Grade=Teacher.Grade "
+      "except "
+      "select * from Student left join Teacher "
+      "on Student.Grade=Teacher.Grade;";
+  dbm.Query(Student{})
+      .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+      .Except(joinedQuery)
+      .ToVector();
+  EXPECT_EQ(result.at("select"), except_str);
 }
