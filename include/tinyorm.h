@@ -10,8 +10,6 @@
 #include <type_traits>
 #include <vector>
 
-#include "db_base.h"
-
 #define REFLECTION(_TABLE_NAME_, ...)                      \
  private:                                                  \
   friend class tinyorm_impl::ReflectionVisitor;            \
@@ -114,6 +112,7 @@ bool operator==(std::nullptr_t, const Nullable<T2>& op2) {
 }  // namespace tinyorm
 
 namespace tinyorm {
+template <typename DB>
 class DBManager;
 }
 
@@ -583,6 +582,7 @@ class Constraint {
  private:
   std::string constraint_;
   std::string field_;
+  template <typename DB>
   friend class DBManager;
 
   Constraint(std::string&& cstr, std::string field = "")
@@ -651,7 +651,7 @@ class Constraint {
   }
 };
 
-template <typename Result>
+template <typename Result, typename DB>
 class QueryResult;
 }  // namespace tinyorm
 
@@ -726,17 +726,18 @@ class QueryHelper {
 
 namespace tinyorm {
 
-template <typename Result>
+template <typename Result, typename DB>
 class QueryResult {
  private:
   template <typename C>
   using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
 
-  template <typename Q>
+  template <typename Q, typename D>
   friend class QueryResult;
+  template <typename D>
   friend class DBManager;
 
-  std::shared_ptr<tinyorm::DB_Base> dbhandler_;
+  std::shared_ptr<DB> dbhandler_;
   Result _queryHelper;
   std::string _sqlFrom;
   std::string _sqlTarget;
@@ -748,7 +749,7 @@ class QueryResult {
   std::string _sqlLimit;
   std::string _sqlOffset;
 
-  QueryResult(std::shared_ptr<tinyorm::DB_Base> db_ptr, Result queryHelper,
+  QueryResult(std::shared_ptr<DB> db_ptr, Result queryHelper,
               std::string sqlFrom, std::string sqlSelect = "select ",
               std::string sqlTarget = "*", std::string sqlWhere = std::string{},
               std::string sqlGroupBy = std::string{},
@@ -813,10 +814,10 @@ class QueryResult {
   }
 
   template <typename... Args>
-  inline QueryResult<std::tuple<Args...>> _NewQuery(
+  inline QueryResult<std::tuple<Args...>, DB> _NewQuery(
       std::string sqlTarget, std::string sqlFrom,
       std::tuple<Args...>&& newQueryHelper) const {
-    return QueryResult<std::tuple<Args...>>(
+    return QueryResult<std::tuple<Args...>, DB>(
         dbhandler_, newQueryHelper, std::move(sqlFrom), _sqlSelect,
         std::move(sqlTarget), _sqlWhere, _sqlGroupBy, _sqlHaving, _sqlOrderBy,
         _sqlLimit, _sqlOffset);
@@ -968,7 +969,7 @@ class QueryResult {
     auto ret = this->OrderBy(args...);
     ret._sqlOrderBy += " desc";
     return std::move(ret);
-  }
+  }  
 
   template <typename C>
   inline auto Join(const C&, const tinyorm_impl::Expression::RelationExpr&,
@@ -1020,11 +1021,12 @@ class QueryResult {
 /**
  * @todo
  */
+template <typename DB>
 class DBManager {
  private:
   template <typename C>
   using HasInjected = tinyorm_impl::ReflectionVisitor::HasInjected<C>;
-  std::shared_ptr<DB_Base> dbhandler_;
+  std::shared_ptr<DB> dbhandler_;
 
   template <typename... Args>
   static void _GetConstraint(
@@ -1117,7 +1119,7 @@ class DBManager {
   }
 
  public:
-  DBManager(std::shared_ptr<DB_Base>&& db) : dbhandler_(std::move(db)) {}
+  DBManager(const std::string& db_name) : dbhandler_(std::make_shared<DB>(db_name)) {}
   ~DBManager() = default;
 
   template <typename C, typename... Args>
@@ -1271,11 +1273,11 @@ class DBManager {
   }
 
   template <typename C>
-  std::enable_if_t<!HasInjected<C>::value, QueryResult<C>> Query(const C&) {}
+  std::enable_if_t<!HasInjected<C>::value, QueryResult<C, DB>> Query(const C&) {}
 
   template <typename C>
-  std::enable_if_t<HasInjected<C>::value, QueryResult<C>> Query(C queryHelper) {
-    return QueryResult<C>(
+  std::enable_if_t<HasInjected<C>::value, QueryResult<C, DB>> Query(C queryHelper) {
+    return QueryResult<C, DB>(
         dbhandler_, std::move(queryHelper),
         std::string(" from ") +
             tinyorm_impl::ReflectionVisitor::TableName(queryHelper));

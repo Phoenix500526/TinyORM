@@ -34,15 +34,15 @@ class Teacher {
   REFLECTION("Teacher", ID, Name, Grade, Address, Salary);
 };
 
-class dummy : public DB_Base {
+class dummy {
  private:
   string db;
 
  public:
   dummy(const string& str) : db(str) {}
   ~dummy() = default;
-  void ForeignKeyOn() override {}
-  void Execute(const string& cmd) override {
+  void ForeignKeyOn() {}
+  void Execute(const string& cmd) {
     size_t first_space = cmd.find_first_of(' ');
     string str = std::move(cmd.substr(0, first_space));
     // result.emplace(str, cmd);
@@ -63,14 +63,14 @@ class TypeSystemUnittest : public ::testing::Test {
       : s1{"0001", 22, "Jack", "2-nd", nullptr, 95, 97, 90},
         t1{"0002", "Rose", "2-nd", nullptr, 1234.56},
         field{s1, t1},
-        dbm{std::unique_ptr<DB_Base>(new dummy("dummy"))} {}
+        dbm{"dummy"} {}
   ~TypeSystemUnittest() = default;
 
  protected:
   Student s1;
   Teacher t1;
   FieldExtractor field;
-  DBManager dbm;
+  DBManager<dummy> dbm;
 };
 
 TEST_F(TypeSystemUnittest, ReflectionTest) {
