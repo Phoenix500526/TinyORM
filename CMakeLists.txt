@@ -16,7 +16,6 @@ if(NOT CLANG_FORMAT_BIN_NAME-NOTFOUND)
     add_custom_target(
             format
             COMMAND ${CLANG_FORMAT_BIN_NAME}
-            -style=google
             -i
             ${ALL_SOURCE_FILES}
     )
