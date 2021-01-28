@@ -41,7 +41,6 @@ private:
 public:
     dummy(const string& str) : db(str) {}
     ~dummy() = default;
-    void ForeignKeyOn() {}
     void Execute(const string& cmd) {
         size_t first_space = cmd.find_first_of(' ');
         string str = std::move(cmd.substr(0, first_space));
@@ -169,9 +168,10 @@ TEST_F(TypeSystemUnittest, AggregateExpressionTest) {
 TEST_F(TypeSystemUnittest, DBManagerTest) {
     string create_str =
         "create table Student("
-        "ID text primary key ,"
-        "Age integer default 22,"
-        "Name text,Grade text,IsMale integer,MathScores integer,ScienceScores "
+        "ID text not null primary key,"
+        "Age integer not null default 22,"
+        "Name text not null,Grade text not null,IsMale integer,MathScores "
+        "integer,ScienceScores "
         "integer,EnglishScores integer,"
         "check ((Student.Age>20 and Student.Age<30)),"
         "unique (MathScores,EnglishScores),"

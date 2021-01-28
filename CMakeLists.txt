@@ -26,6 +26,9 @@ conan_basic_setup()
 enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
-
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 add_subdirectory(test)
+add_subdirectory(example)

@@ -54,6 +54,15 @@ TEST_F(TypesUnittest, NullableConstructTest) {
     EXPECT_EQ(var_1.Value(), 3);
     EXPECT_EQ(var_4.HasValue(), true);
     EXPECT_EQ(var_4.Value(), string("HelloWorld"));
+    Nullable<string> tmp_3 = "HelloWorld";
+    EXPECT_TRUE(tmp_3.HasValue());
+    EXPECT_EQ(tmp_3.Value(), string("HelloWorld"));
+    tmp_3 = "World";
+    EXPECT_TRUE(tmp_3.HasValue());
+    EXPECT_EQ(tmp_3.Value(), string("World"));
+    tmp_3 = "";
+    EXPECT_FALSE(tmp_3.HasValue());
+    EXPECT_TRUE(tmp_3 == nullptr);
 }
 
 TEST_F(TypesUnittest, NullableCompareTest) {

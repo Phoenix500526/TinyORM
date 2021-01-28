@@ -1,12 +1,17 @@
 #ifndef TINYORM_H_
 #define TINYORM_H_
 
+#include <sqlite3.h>
+
+#include <chrono>
 #include <cstddef>
+#include <functional>
 #include <list>
 #include <map>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -34,7 +39,6 @@ private:                                                     \
 #define NOT_THE_SAME_TABLE "Field is not in the same table"
 #define BAD_COLUMN_COUNT "Bad Column Count"
 namespace tinyorm {
-
 /**
  * @brief Nullable is wrapper class.
  * @details
@@ -59,11 +63,20 @@ private:
     friend bool operator==(const Nullable<T2>& op1, std::nullptr_t);
     template <typename T2>
     friend bool operator==(std::nullptr_t, const Nullable<T2>& op2);
-
 public:
     Nullable() : hasValue_(false), value_(T()) {}
     Nullable(std::nullptr_t) : Nullable() {}
     Nullable(const T& value) : hasValue_(true), value_(value) {}
+    template <std::size_t N>
+    Nullable(const char (&arr)[N]) {
+        if constexpr (N == 1) {
+            hasValue_ = false;
+            value_ = T();
+        } else {
+            hasValue_ = true;
+            value_ = T(arr);
+        }
+    }
     ~Nullable() = default;
 
     Nullable<T> operator=(std::nullptr_t) {
@@ -78,9 +91,22 @@ public:
         return *this;
     }
 
-    inline bool HasValue() const { return hasValue_; }
+    template <std::size_t N>
+    Nullable<std::string> operator=(const char (&arr)[N]) {
+        if constexpr (1 == N) {
+            hasValue_ = false;
+            value_ = std::string();
 
+        } else {
+            hasValue_ = true;
+            value_ = std::string(arr);
+        }
+        return *this;
+    }
+
+    inline bool HasValue() const { return hasValue_; }
     inline const T& Value() const { return value_; }
+
 };
 
 template <typename T2>
@@ -117,6 +143,7 @@ class DBManager;
 }
 
 namespace tinyorm_impl {
+
 /**
  * @brief A visitor for reflection
  * @details User shouldn't access the reflection information directly, cuz that
@@ -519,6 +546,75 @@ inline auto Avg(const Field<T>& field) {
 }  // namespace tinyorm_impl
 
 namespace tinyorm {
+
+class Sqlite3 {
+public:
+    Sqlite3(const std::string& db_name) {
+        if (sqlite3_open(db_name.c_str(), &db) != SQLITE_OK)
+            throw std::runtime_error(
+                std::string("SQL error: Can't open database '") +
+                sqlite3_errmsg(db) + "'");
+    }
+    ~Sqlite3() { sqlite3_close(db); }
+
+    void Execute(const std::string& cmd) {
+        char* zErrMsg = nullptr;
+        int rc = SQLITE_OK;
+        for (int i = 0; i < MAX_TRIAL; ++i) {
+            rc = sqlite3_exec(db, cmd.c_str(), 0, 0, &zErrMsg);
+            if (rc != SQLITE_BUSY) break;
+            std::this_thread::sleep_for(std::chrono::microseconds(20));
+        }
+        if (rc != SQLITE_OK) {
+            auto errStr =
+                std::string("SQL ERROR: '") + zErrMsg + "' at '" + cmd + "'";
+            sqlite3_free(zErrMsg);
+            throw std::runtime_error(errStr);
+        }
+    }
+
+    void ExecuteCallback(const std::string& cmd,
+                         std::function<void(int, char**)> callback) {
+        char* zErrMsg = nullptr;
+        int rc = SQLITE_OK;
+        auto callbackParam = std::make_pair(&callback, std::string{});
+
+        for (size_t i = 0; i < MAX_TRIAL; ++i) {
+            rc = sqlite3_exec(db, cmd.c_str(), CallbackWrapper, &callbackParam,
+                              &zErrMsg);
+            if (rc != SQLITE_BUSY) break;
+            std::this_thread::sleep_for(std::chrono::microseconds(20));
+        }
+        if (rc == SQLITE_ABORT) {
+            auto errStr =
+                "SQL error: '" + callbackParam.second + "' at '" + cmd + "'";
+            sqlite3_free(zErrMsg);
+            throw std::runtime_error(errStr);
+        } else if (rc != SQLITE_OK) {
+            auto errStr =
+                std::string("SQL error: '") + zErrMsg + "' at '" + cmd + "'";
+            sqlite3_free(zErrMsg);
+            throw std::runtime_error(errStr);
+        }
+    }
+
+private:
+    sqlite3* db;
+    constexpr static size_t MAX_TRIAL = 16;
+    static int CallbackWrapper(void* cbParam, int argc, char** argv, char**) {
+        auto pParam = static_cast<
+            std::pair<std::function<void(int, char**)>*, std::string>*>(
+            cbParam);
+        try {
+            pParam->first->operator()(argc, argv);
+            return 0;
+        } catch (const std::exception& ex) {
+            pParam->second = ex.what();
+            return 1;
+        }
+    }
+};
+
 /**
  * @brief Extract fields from the given object for the JOIN operation.
  */
@@ -1033,6 +1129,30 @@ public:
     }
 };
 
+template <typename T>
+struct Is_Nullable {
+private:
+    typedef char type_must_is_complete[sizeof(T) ? 1 : -1];
+    template <typename U>
+    static auto Check_HasValue(int)
+        -> decltype(std::declval<U>().HasValue(), std::true_type());
+    template <typename U>
+    static std::false_type Check_HasValue(...);
+
+    template <typename U>
+    static auto Check_Value(int)
+        -> decltype(std::declval<U>().Value(), std::true_type());
+    template <typename U>
+    static std::false_type Check_Value(...);
+
+public:
+    enum {
+        value = std::is_same<decltype(Check_HasValue<T>(0)),
+                             std::true_type>::value &&
+                std::is_same<decltype(Check_Value<T>(0)), std::true_type>::value
+    };
+};
+
 /**
  * @todo
  */
@@ -1137,7 +1257,9 @@ private:
 
 public:
     DBManager(const std::string& db_name)
-        : dbhandler_(std::make_shared<DB>(db_name)) {}
+        : dbhandler_(std::make_shared<DB>(db_name)) {
+        dbhandler_->Execute("PRAGMA foreign_keys = ON;");
+    }
     ~DBManager() = default;
 
     template <typename C, typename... Args>
@@ -1155,6 +1277,9 @@ public:
             constexpr const char* typeStr = tinyorm_impl::TypeString<
                 std::decay_t<decltype(arg)>>::type_string;
             fieldFixes.emplace(fieldNames[idx], typeStr);
+            if constexpr (!Is_Nullable<std::decay_t<decltype(arg)>>::value) {
+                fieldFixes[fieldNames[idx]] += " not null";
+            }
         };
         tinyorm_impl::ReflectionVisitor::Visit(
             entity, [&addTypeStr](const auto&... args) {
@@ -1162,7 +1287,7 @@ public:
                 (addTypeStr(args, idx++), ...);
             });
 
-        fieldFixes[fieldNames[0]] += " primary key ";
+        fieldFixes[fieldNames[0]] += " primary key";
         std::string tableFixes;
         _GetConstraint(tableFixes, fieldFixes, cstrs...);
 
