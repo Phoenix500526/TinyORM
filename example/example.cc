@@ -192,6 +192,21 @@ int main() {
                         .ToVector();
     PrintHelper::PrintTuples(result_5);
 
+    auto result_6 =
+        JoinQueryResult
+            .Select(field(order.Name),
+                    Avg(field(order.Count) * field(warehouse.Price)))
+            .GroupBy(field(order.Name))
+            .Having(Sum(field(order.Count) * field(warehouse.Price)) >= 40.5)
+            .ToVector();
+    PrintHelper::PrintTuples(result_6);
+
+    auto count_of_Jack = dbm.Query(OrderTable{})
+                             .Where(field(order.Name) == string("Jack"))
+                             .Aggregate(Sum(field(order.Count)));
+    PrintHelper::PrintNullable(count_of_Jack);
+    cout << endl;
+
     /*
      * DELETE FROM OrderTable where OrderTable.OrderId like '000001%';
      */

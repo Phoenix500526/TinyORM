@@ -1165,6 +1165,19 @@ public:
         return _NewCompoundQuery(queryResult, " except ");
     }
 
+    template <typename T>
+    Nullable<T> Aggregate(
+        const tinyorm_impl::Expression::AggregateField<T>& agg) const {
+        Nullable<T> ret;
+        dbhandler_->ExecuteCallback(
+            _sqlSelect + agg.fieldName_ + _GetFromSql() + _GetLimit() + ";",
+            [&ret](int argc, char** argv) {
+                if (argc != 1) throw std::runtime_error(BAD_COLUMN_COUNT);
+                tinyorm_impl::Deserializer::Deserialize(ret, argv[0]);
+            });
+        return ret;
+    }
+
     std::vector<Result> ToVector() const {
         std::vector<Result> ret;
         _Select(_queryHelper, ret);
