@@ -31,6 +31,59 @@ private:                                                     \
         #__VA_ARGS__;  //!< Generate reflection information for
                        //!< user-defined class
 
+#define CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(OP, LHS_TYPE, RHS_TYPE)  \
+    template <typename T1, typename T2,                                        \
+              class Enable = std::enable_if_t<std::is_arithmetic<T1>::value && \
+                                              std::is_arithmetic<T2>::value>>  \
+    inline auto operator OP(LHS_TYPE field, RHS_TYPE value) {                  \
+        std::string expression = "(";                                          \
+        if (field.tableName_) expression += (*field.tableName_ + ".");         \
+        expression += field.fieldName_ + #OP + std::to_string(value) + ")";    \
+        if constexpr (std::is_convertible<T1, T2>::value) {                    \
+            return CalculateField<T2>(expression);                             \
+        } else {                                                               \
+            return CalculateField<T1>(expression);                             \
+        }                                                                      \
+    }
+
+#define CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(OP, LHS_TYPE, RHS_TYPE)  \
+    template <typename T1, typename T2,                                        \
+              class Enable = std::enable_if_t<std::is_arithmetic<T1>::value && \
+                                              std::is_arithmetic<T2>::value>>  \
+    inline auto operator OP(LHS_TYPE value, RHS_TYPE field) {                  \
+        std::string expression = "(" + std::to_string(value) + #OP;            \
+        if (field.tableName_) expression += (*field.tableName_ + ".");         \
+        expression += field.fieldName_ + ")";                                  \
+        if constexpr (std::is_convertible<T1, T2>::value) {                    \
+            return CalculateField<T2>(expression);                             \
+        } else {                                                               \
+            return CalculateField<T1>(expression);                             \
+        }                                                                      \
+    }
+
+#define CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(OP, LHS_TYPE, RHS_TYPE)  \
+    template <typename T1, typename T2,                                        \
+              class Enable = std::enable_if_t<std::is_arithmetic<T1>::value && \
+                                              std::is_arithmetic<T2>::value>>  \
+    inline auto operator OP(LHS_TYPE lhs, RHS_TYPE rhs) {                      \
+        std::string expression = "(";                                          \
+        if (lhs.tableName_) expression += (*lhs.tableName_ + ".");             \
+        expression += lhs.fieldName_ + #OP;                                    \
+        if (rhs.tableName_) expression += (*rhs.tableName_ + ".");             \
+        expression += rhs.fieldName_ + ")";                                    \
+        if constexpr (std::is_convertible<T1, T2>::value) {                    \
+            return CalculateField<T2>(expression);                             \
+        } else {                                                               \
+            return CalculateField<T1>(expression);                             \
+        }                                                                      \
+    }
+
+#define RELATION_BINARY_OPERATOR_GENERATOR(OP, LHS, RHS) \
+    template <typename T>                                \
+    inline RelationExpr operator OP(LHS lhs, RHS rhs) {  \
+        return RelationExpr(lhs, #OP, rhs);              \
+    }
+
 #define NO_REFLECTIONED \
     "Please Inject the metainformation of your class by `REFLECTION` first"
 #define NO_SUCH_FIELD "No such a field"
@@ -63,6 +116,7 @@ private:
     friend bool operator==(const Nullable<T2>& op1, std::nullptr_t);
     template <typename T2>
     friend bool operator==(std::nullptr_t, const Nullable<T2>& op2);
+
 public:
     Nullable() : hasValue_(false), value_(T()) {}
     Nullable(std::nullptr_t) : Nullable() {}
@@ -106,7 +160,6 @@ public:
 
     inline bool HasValue() const { return hasValue_; }
     inline const T& Value() const { return value_; }
-
 };
 
 template <typename T2>
@@ -360,11 +413,44 @@ template <typename T>
 struct AggregateField : public FieldBase<T> {
     AggregateField(std::string function)
         : FieldBase<T>(std::move(function), nullptr) {}
-    AggregateField(std::string function, const Field<T>& field)
-        : FieldBase<T>(std::move(function) + "(" + *field.tableName_ + "." +
+    AggregateField(std::string function, const FieldBase<T>& field)
+        : FieldBase<T>(std::move(function) + "(" +
+                           (field.tableName_ ? *field.tableName_ + "." : "") +
                            field.fieldName_ + ")",
                        nullptr) {}
 };
+
+template <typename T>
+struct CalculateField : public FieldBase<T> {
+    CalculateField(std::string expression)
+        : FieldBase<T>(std::move(expression), nullptr) {}
+};
+
+//! Field op value
+CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(+, const FieldBase<T1>&, T2)
+CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(-, const FieldBase<T1>&, T2)
+CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(*, const FieldBase<T1>&, T2)
+CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(/, const FieldBase<T1>&, T2)
+CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR(%, const FieldBase<T1>&, T2)
+
+//! Value op field
+CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(+, T1, const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(-, T1, const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(*, T1, const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(/, T1, const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR(%, T1, const FieldBase<T2>&)
+
+//! Field op field
+CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(+, const FieldBase<T1>&,
+                                              const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(-, const FieldBase<T1>&,
+                                              const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(*, const FieldBase<T1>&,
+                                              const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(/, const FieldBase<T1>&,
+                                              const FieldBase<T2>&)
+CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR(%, const FieldBase<T1>&,
+                                              const FieldBase<T2>&)
 
 class RelationExpr {
 public:
@@ -431,30 +517,11 @@ inline RelationExpr operator==(const FieldBase<T>& field, T value) {
     return RelationExpr(field, "=", value);
 }
 
-template <typename T>
-inline RelationExpr operator!=(const FieldBase<T>& field, T value) {
-    return RelationExpr(field, "!=", value);
-}
-
-template <typename T>
-inline RelationExpr operator<(const FieldBase<T>& field, T value) {
-    return RelationExpr(field, "<", value);
-}
-
-template <typename T>
-inline RelationExpr operator<=(const FieldBase<T>& field, T value) {
-    return RelationExpr(field, "<=", value);
-}
-
-template <typename T>
-inline RelationExpr operator>(const FieldBase<T>& field, T value) {
-    return RelationExpr(field, ">", value);
-}
-
-template <typename T>
-inline RelationExpr operator>=(const FieldBase<T>& field, T value) {
-    return RelationExpr(field, ">=", value);
-}
+RELATION_BINARY_OPERATOR_GENERATOR(!=, const FieldBase<T>&, T)
+RELATION_BINARY_OPERATOR_GENERATOR(<, const FieldBase<T>&, T)
+RELATION_BINARY_OPERATOR_GENERATOR(<=, const FieldBase<T>&, T)
+RELATION_BINARY_OPERATOR_GENERATOR(>, const FieldBase<T>&, T)
+RELATION_BINARY_OPERATOR_GENERATOR(>=, const FieldBase<T>&, T)
 
 inline RelationExpr operator&(const FieldBase<std::string>& field,
                               const std::string& value) {
@@ -473,35 +540,11 @@ inline RelationExpr operator==(const FieldBase<T>& lhs,
     return RelationExpr(lhs, "=", rhs);
 }
 
-template <typename T>
-inline RelationExpr operator!=(const FieldBase<T>& lhs,
-                               const FieldBase<T>& rhs) {
-    return RelationExpr(lhs, "!=", rhs);
-}
-
-template <typename T>
-inline RelationExpr operator<(const FieldBase<T>& lhs,
-                              const FieldBase<T>& rhs) {
-    return RelationExpr(lhs, "<", rhs);
-}
-
-template <typename T>
-inline RelationExpr operator<=(const FieldBase<T>& lhs,
-                               const FieldBase<T>& rhs) {
-    return RelationExpr(lhs, "<=", rhs);
-}
-
-template <typename T>
-inline RelationExpr operator>(const FieldBase<T>& lhs,
-                              const FieldBase<T>& rhs) {
-    return RelationExpr(lhs, ">", rhs);
-}
-
-template <typename T>
-inline RelationExpr operator>=(const FieldBase<T>& lhs,
-                               const FieldBase<T>& rhs) {
-    return RelationExpr(lhs, ">=", rhs);
-}
+RELATION_BINARY_OPERATOR_GENERATOR(!=, const FieldBase<T>&, const FieldBase<T>&)
+RELATION_BINARY_OPERATOR_GENERATOR(<, const FieldBase<T>&, const FieldBase<T>&)
+RELATION_BINARY_OPERATOR_GENERATOR(<=, const FieldBase<T>&, const FieldBase<T>&)
+RELATION_BINARY_OPERATOR_GENERATOR(>, const FieldBase<T>&, const FieldBase<T>&)
+RELATION_BINARY_OPERATOR_GENERATOR(>=, const FieldBase<T>&, const FieldBase<T>&)
 
 //! NullableField op null
 template <typename T>
@@ -518,27 +561,27 @@ inline RelationExpr operator!=(const FieldBase<T>& lhs, std::nullptr_t) {
 inline auto Count() { return AggregateField<size_t>("count (*)"); }
 
 template <typename T>
-inline auto Count(const Field<T>& field) {
+inline auto Count(const FieldBase<T>& field) {
     return AggregateField<T>("count", field);
 }
 
 template <typename T>
-inline auto Sum(const Field<T>& field) {
+inline auto Sum(const FieldBase<T>& field) {
     return AggregateField<T>("sum", field);
 }
 
 template <typename T>
-inline auto Max(const Field<T>& field) {
+inline auto Max(const FieldBase<T>& field) {
     return AggregateField<T>("max", field);
 }
 
 template <typename T>
-inline auto Min(const Field<T>& field) {
+inline auto Min(const FieldBase<T>& field) {
     return AggregateField<T>("min", field);
 }
 
 template <typename T>
-inline auto Avg(const Field<T>& field) {
+inline auto Avg(const FieldBase<T>& field) {
     return AggregateField<T>("avg", field);
 }
 
@@ -1437,4 +1480,8 @@ public:
 #undef BAD_TYPE
 #undef NOT_THE_SAME_TABLE
 #undef BAD_COLUMN_COUNT
+#undef CALCULATEFIELD_OPERATOR_FIELD_VALUE_GENERATOR
+#undef CALCULATEFIELD_OPERATOR_VALUE_FIELD_GENERATOR
+#undef CALCULATEFIELD_OPERATOR_FIELD_FIELD_GENERATOR
+#undef RELATION_BINARY_OPERATOR_GENERATOR
 #endif  // TINYORM_H_

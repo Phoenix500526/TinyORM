@@ -155,15 +155,43 @@ int main() {
                         .ToVector();
     PrintHelper::PrintTuples(result_1);
 
-    auto result_2 = dbm.Query(OrderTable{})
-                        .Join(Warehouse{}, field(order.CommodityID) ==
-                                               field(warehouse.CommodityID));
-    auto result_3 = result_2
-                        .Select(field(order.Name), field(order.Count),
-                                field(warehouse.Price))
-                        .Where(field(order.Name) == string("Rose"))
+    /*
+     * SELECT OrderTable.Name, OrderTable.Count, Warehouse.Price
+     * 		FROM OrderTable JOIN Warehouse
+     * 		ON OrderTable.CommodityID=Warehouse.CommodityID
+     * 		WHERE OrderTable.Name='Rose';
+     */
+    auto JoinQueryResult =
+        dbm.Query(OrderTable{})
+            .Join(Warehouse{},
+                  field(order.CommodityID) == field(warehouse.CommodityID));
+
+    auto result_2 = JoinQueryResult
+                        .Select(field(order.Name), Sum(field(order.Count) *
+                                                       field(warehouse.Price)))
+                        .Where(field(order.Name) == string("Jack"))
+                        .ToVector();
+    PrintHelper::PrintTuples(result_2);
+
+    auto result_3 = JoinQueryResult
+                        .Select(field(order.Name), Avg(field(order.Count) *
+                                                       field(warehouse.Price)))
+                        .Where(field(order.Name) == string("Jack"))
                         .ToVector();
     PrintHelper::PrintTuples(result_3);
+
+    auto result_4 = JoinQueryResult
+                        .Select(field(order.Name), Min(field(order.Count) *
+                                                       field(warehouse.Price)))
+                        .ToVector();
+    PrintHelper::PrintTuples(result_4);
+
+    auto result_5 = JoinQueryResult
+                        .Select(field(order.Name), Max(field(order.Count) *
+                                                       field(warehouse.Price)))
+                        .ToVector();
+    PrintHelper::PrintTuples(result_5);
+
     /*
      * DELETE FROM OrderTable where OrderTable.OrderId like '000001%';
      */

@@ -44,7 +44,6 @@ public:
     void Execute(const string& cmd) {
         size_t first_space = cmd.find_first_of(' ');
         string str = std::move(cmd.substr(0, first_space));
-        // result.emplace(str, cmd);
         result[str] = cmd;
     }
 
@@ -153,6 +152,32 @@ TEST_F(TypeSystemUnittest, RelationExpressionTest) {
               string("Student.MathScores is null"));
     EXPECT_EQ((s1_math != nullptr).ToString(),
               string("Student.MathScores is not null"));
+}
+
+TEST_F(TypeSystemUnittest, CalculationExpressionTest) {
+    EXPECT_EQ((field(s1.Age) + 10).ToString(), string("(Student.Age+10)"));
+    EXPECT_EQ((field(s1.Age) - 10).ToString(), string("(Student.Age-10)"));
+    EXPECT_EQ((field(s1.Age) * 10).ToString(), string("(Student.Age*10)"));
+    EXPECT_EQ((field(s1.Age) / 10).ToString(), string("(Student.Age/10)"));
+    EXPECT_EQ((field(s1.Age) % 10).ToString(), string("(Student.Age%10)"));
+
+    EXPECT_EQ((10 + field(s1.Age)).ToString(), string("(10+Student.Age)"));
+    EXPECT_EQ((10 - field(s1.Age)).ToString(), string("(10-Student.Age)"));
+    EXPECT_EQ((10 * field(s1.Age)).ToString(), string("(10*Student.Age)"));
+    EXPECT_EQ((10 / field(s1.Age)).ToString(), string("(10/Student.Age)"));
+    EXPECT_EQ((10 % field(s1.Age)).ToString(), string("(10%Student.Age)"));
+
+    string calculation_column =
+        "(Student.MathScores+((Student.EnglishScores*0.800000)+(Student."
+        "ScienceScores*0.700000)))";
+    auto res = field(s1.MathScores) +
+               (field(s1.EnglishScores) * 0.8 + field(s1.ScienceScores) * 0.7);
+    EXPECT_EQ(res.ToString(), calculation_column);
+
+    string sum_of_calculation_column =
+        "sum((Student.MathScores+((Student.EnglishScores*0.800000)+(Student."
+        "ScienceScores*0.700000))))";
+    EXPECT_EQ(Sum(res).ToString(), sum_of_calculation_column);
 }
 
 TEST_F(TypeSystemUnittest, AggregateExpressionTest) {
@@ -341,12 +366,34 @@ TEST_F(TypeSystemUnittest, InterTableSelect) {
     EXPECT_EQ(result.at("select"), join_str);
 
     join_str =
+        "select "
+        "Teacher.Name,sum(((Student.MathScores+Student.EnglishScores)+Student."
+        "ScienceScores)) "
+        "from Student join Teacher on Student.Grade=Teacher.Grade "
+        "where (Student.Grade='3-th');";
+    dbm.Query(Student{})
+        .Join(Teacher{}, field(s1.Grade) == field(t1.Grade))
+        .Select(field(t1.Name),
+                Sum((field(s1.MathScores) + field(s1.EnglishScores)) +
+                    field(s1.ScienceScores)))
+        .Where(field(s1.Grade) == string("3-th"))
+        .ToVector();
+    EXPECT_EQ(result.at("select"), join_str);
+
+    join_str =
         "select * from Teacher left join Student on "
         "Teacher.Grade=Student.Grade;";
     dbm.Query(Teacher{})
         .LeftJoin(Student{}, field(t1.Grade) == field(s1.Grade))
         .ToVector();
     EXPECT_EQ(result.at("select"), join_str);
+
+    /*
+     * SELECT OrderTable.Name, OrderTable.Count, Warehouse.Price
+     *      FROM OrderTable JOIN Warehouse
+     *      ON OrderTable.CommodityID=Warehouse.CommodityID
+     *      WHERE OrderTable.Name='Rose';
+     */
 
     string union_str =
         "select * from Student join Teacher "
