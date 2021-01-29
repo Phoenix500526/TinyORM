@@ -1318,6 +1318,17 @@ public:
     }
     ~DBManager() = default;
 
+    template <typename Fn>
+    void Transaction(Fn&& fn) {
+        try {
+            dbhandler_->Execute("begin transaction;");
+            fn();
+            dbhandler_->Execute("commit transaction;");
+        } catch (...) {
+            dbhandler_->Execute("rollback transaction;");
+        }
+    }
+
     template <typename C, typename... Args>
     std::enable_if_t<!HasInjected<C>::value> CreateTbl(const C&,
                                                        const Args&...) {}

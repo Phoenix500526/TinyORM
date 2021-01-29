@@ -1,4 +1,5 @@
 #include <iostream>
+#include <random>
 #include <vector>
 
 #include "tinyorm.h"
@@ -136,6 +137,24 @@ int main() {
     dbm.InsertRange(buyer_2);
     dbm.Insert(buyer_3);
     buyer_3.Date = "2021-01-01";
+
+    dbm.Transaction([&dbm]() {
+        vector<string> names = {"Jack", "Rose", "David", "Dick",  "Jane",
+                                "Paul", "Rock", "Penny", "Monica"};
+        vector<string> address = {"China",  "USA",    "UK",     "Signapore",
+                                  "France", "Germen", "Russia", "Thailand"};
+        vector<string> commodity = {"00003", "00013", "00010", "00042",
+                                    "00101"};
+        default_random_engine generator;
+        uniform_int_distribution<int> distribution(0, 8);
+        uniform_int_distribution<int> count(1, 50);
+        for (int i = 0; i < 10; ++i) {
+            int idx = distribution(generator);
+            dbm.Insert(OrderTable{
+                "000000-" + std::to_string(i), names[idx], "55555333331",
+                address[idx], commodity[idx % 5], count(generator), nullptr});
+        }
+    });
 
     /*
      * UPDATE OrderTable SET OrderTable.Date='2021-01-01' WHERE
