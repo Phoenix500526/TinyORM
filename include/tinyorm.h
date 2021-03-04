@@ -103,8 +103,7 @@ namespace tinyorm {
 template <typename T>
 class Nullable {
 private:
-    bool hasValue_;
-    T value_;
+    std::optional<T> value_;
 
     template <typename T2>
     friend bool operator==(const Nullable<T2>& op1, const Nullable<T2>& op2);
@@ -118,29 +117,25 @@ private:
     friend bool operator==(std::nullptr_t, const Nullable<T2>& op2);
 
 public:
-    Nullable() : hasValue_(false), value_(T()) {}
+    Nullable() : value_(std::nullopt){}
     Nullable(std::nullptr_t) : Nullable() {}
-    Nullable(const T& value) : hasValue_(true), value_(value) {}
+    Nullable(const T& value) : value_(value) {}
     template <std::size_t N>
     Nullable(const char (&arr)[N]) {
         if constexpr (N == 1) {
-            hasValue_ = false;
-            value_ = T();
+            value_ = std::optional<T>();
         } else {
-            hasValue_ = true;
-            value_ = T(arr);
+            value_ = std::optional<T>(arr);
         }
     }
     ~Nullable() = default;
 
     Nullable<T> operator=(std::nullptr_t) {
-        hasValue_ = false;
-        value_ = T();
+        value_ = std::nullopt;
         return *this;
     }
 
     Nullable<T> operator=(const T& value) {
-        hasValue_ = true;
         value_ = value;
         return *this;
     }
@@ -148,18 +143,15 @@ public:
     template <std::size_t N>
     Nullable<std::string> operator=(const char (&arr)[N]) {
         if constexpr (1 == N) {
-            hasValue_ = false;
-            value_ = std::string();
-
+            value_ = std::optional<std::string>();
         } else {
-            hasValue_ = true;
-            value_ = std::string(arr);
+            value_ = std::optional<std::string>(arr);
         }
         return *this;
     }
 
-    inline bool HasValue() const { return hasValue_; }
-    inline const T& Value() const { return value_; }
+    inline bool HasValue() const { return value_.has_value(); }
+    inline const T& Value() const { return value_.value(); }
 };
 
 template <typename T2>
